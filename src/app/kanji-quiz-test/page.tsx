@@ -1,0 +1,898 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+const TEST_LOGIN_ID = "test_ami_001";
+
+type QuizOption = {
+  label: string;
+  isCorrect: boolean;
+};
+
+type QuizQuestion = {
+  kanji: string;
+  unit: string | null;
+  order_in_unit: number;
+  questionText: string;
+  correctAnswer: string;
+  options: QuizOption[];
+};
+
+type BatchResponse = {
+  account: {
+    display_name: string | null;
+    student_login_id: string;
+  };
+  unit: string;
+  lastOrderCompleted: number;
+  mode?: string;
+  questions: QuizQuestion[];
+};
+
+type AttemptRow = {
+  kanji: string;
+  order_in_unit: number;
+  quiz_type: string;
+  user_answer: string;
+  correct_answer: string;
+  is_correct: boolean;
+};
+
+type QuizMode = "normal" | "review-wrong" | "review-studied";
+
+export default function KanjiQuizTestPage() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [batch, setBatch] = useState<BatchResponse | null>(null);
+
+  const [mainIndex, setMainIndex] = useState(0);
+  const [reviewQueue, setReviewQueue] = useState<QuizQuestion[]>([]);
+  const [phase, setPhase] = useState<"main" | "review">("main");
+
+  const [selected, setSelected] = useState<string>("");
+  const [checked, setChecked] = useState(false);
+  const [wasCorrect, setWasCorrect] = useState<boolean | null>(null);
+  const [attempts, setAttempts] = useState<AttemptRow[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [quizMode, setQuizMode] = useState<QuizMode>("normal");
+  const [showSetComplete, setShowSetComplete] = useState(false);
+  const [showFinishMessage, setShowFinishMessage] = useState(false);
+  const [lastSetCorrectCount, setLastSetCorrectCount] = useState(0);
+  const [lastSetWrongCount, setLastSetWrongCount] = useState(0);
+
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  async function loadBatch(mode: QuizMode = "normal") {
+    setLoading(true);
+    setError("");
+    setSelected("");
+    setChecked(false);
+    setWasCorrect(null);
+    setMainIndex(0);
+    setReviewQueue([]);
+    setPhase("main");
+    setAttempts([]);
+    setQuizMode(mode);
+    setShowSetComplete(false);
+    setShowFinishMessage(false);
+
+    const res = await fetch(`/api/kanji-quiz-test?mode=${mode}`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      setError(data.error ?? "Failed to load quiz.");
+      setBatch(null);
+      setLoading(false);
+      return;
+    }
+
+    setBatch(data);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadBatch("normal");
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const currentQuestion = useMemo(() => {
+    if (!batch || batch.questions.length === 0) return null;
+    if (phase === "main") return batch.questions[mainIndex] ?? null;
+    return reviewQueue[0] ?? null;
+  }, [batch, mainIndex, phase, reviewQueue]);
+
+  const progressLabel = useMemo(() => {
+    if (!batch) return "";
+    if (phase === "main") return `${mainIndex + 1} / ${batch.questions.length}`;
+    return `Review: ${reviewQueue.length} left`;
+  }, [batch, mainIndex, phase, reviewQueue.length]);
+
+  async function saveSetOnly() {
+    if (!batch) return false;
+
+    setSaving(true);
+    setError("");
+
+    const res = await fetch("/api/kanji-quiz-test", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        loginId: TEST_LOGIN_ID,
+        unit: batch.unit,
+        advanceCount: batch.questions.length,
+        attempts,
+        mode: quizMode,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      setError(data.error ?? "Failed to save progress.");
+      setSaving(false);
+      return false;
+    }
+
+    setSaving(false);
+    return true;
+  }
+
+  function resetQuestionState() {
+    setSelected("");
+    setChecked(false);
+    setWasCorrect(null);
+  }
+
+  function openSetCompleteScreen() {
+    const correctCount = attempts.filter((item) => item.is_correct).length;
+    const wrongCount = attempts.filter((item) => !item.is_correct).length;
+
+    setLastSetCorrectCount(correctCount);
+    setLastSetWrongCount(wrongCount);
+    setShowSetComplete(true);
+  }
+
+  async function handleNext() {
+    if (!currentQuestion) return;
+
+    if (!checked) {
+      if (!selected) return;
+
+      const correct = selected === currentQuestion.correctAnswer;
+      setChecked(true);
+      setWasCorrect(correct);
+
+      setAttempts((prev) => [
+        ...prev,
+        {
+          kanji: currentQuestion.kanji,
+          order_in_unit: currentQuestion.order_in_unit,
+          quiz_type: "meaning_choice",
+          user_answer: selected,
+          correct_answer: currentQuestion.correctAnswer,
+          is_correct: correct,
+        },
+      ]);
+
+      if (!correct) {
+        if (phase === "main") {
+          setReviewQueue((prev) => {
+            const exists = prev.some(
+              (item) =>
+                item.kanji === currentQuestion.kanji &&
+                item.order_in_unit === currentQuestion.order_in_unit
+            );
+            return exists ? prev : [...prev, currentQuestion];
+          });
+        } else {
+          setReviewQueue((prev) => {
+            const rest = prev.slice(1);
+            return [...rest, currentQuestion];
+          });
+        }
+      }
+      return;
+    }
+
+    if (phase === "main") {
+      if (!batch) return;
+
+      if (mainIndex < batch.questions.length - 1) {
+        setMainIndex((prev) => prev + 1);
+        resetQuestionState();
+        return;
+      }
+
+      if (reviewQueue.length > 0) {
+        setPhase("review");
+        resetQuestionState();
+        return;
+      }
+
+      const ok = await saveSetOnly();
+      if (!ok) return;
+
+      openSetCompleteScreen();
+      return;
+    }
+
+    if (phase === "review") {
+      const nextQueue = wasCorrect ? reviewQueue.slice(1) : reviewQueue;
+
+      if (wasCorrect) {
+        setReviewQueue(nextQueue);
+      }
+
+      resetQuestionState();
+
+      if (nextQueue.length === 0 && wasCorrect) {
+        const ok = await saveSetOnly();
+        if (!ok) return;
+
+        openSetCompleteScreen();
+      }
+    }
+  }
+
+  async function handleMenuAction(mode: QuizMode) {
+    setMenuOpen(false);
+    await loadBatch(mode);
+  }
+
+  async function handleDoFiveMore() {
+    await loadBatch("normal");
+  }
+
+  function handleFinishForToday() {
+    setShowSetComplete(false);
+    setShowFinishMessage(true);
+  }
+
+  if (loading) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div style={styles.loadingCard}>Loading quiz...</div>
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div style={styles.errorCard}>{error}</div>
+        </div>
+      </main>
+    );
+  }
+
+  if (showFinishMessage) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div style={styles.finishCard}>
+            <h2 style={styles.finishTitle}>Great work today!</h2>
+            <p style={styles.finishText}>You can stop here and come back anytime.</p>
+            <button
+              type="button"
+              onClick={() => loadBatch("normal")}
+              style={styles.finishButton}
+            >
+              Start again
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (showSetComplete) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div style={styles.setCompleteCard}>
+            <h2 style={styles.setCompleteTitle}>Set complete!</h2>
+            <p style={styles.setCompleteText}>You finished 5 questions.</p>
+            <p style={styles.setCompleteScore}>
+              Correct: {lastSetCorrectCount} / 5
+            </p>
+            <p style={styles.setCompleteScore}>
+              Wrong answers: {lastSetWrongCount}
+            </p>
+
+            <div style={styles.setCompleteButtons}>
+              <button
+                type="button"
+                onClick={handleDoFiveMore}
+                style={styles.setCompletePrimaryButton}
+              >
+                Do 5 more
+              </button>
+              <button
+                type="button"
+                onClick={handleFinishForToday}
+                style={styles.setCompleteSecondaryButton}
+              >
+                Finish for today
+              </button>
+            </div>
+
+            {lastSetWrongCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => loadBatch("review-wrong")}
+                style={styles.reviewWrongButton}
+              >
+                Review wrong answers
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!batch || batch.questions.length === 0 || !currentQuestion) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div style={styles.loadingCard}>No questions available.</div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main style={styles.page}>
+      <div style={styles.appFrame}>
+        <div style={styles.topArea}>
+          <div style={styles.topInner}>
+            <div style={styles.metaRow}>
+              <div style={styles.metaBox}>
+                <div style={styles.metaLabel}>Unit</div>
+                <div style={styles.metaValue}>{batch.unit}</div>
+              </div>
+
+              <div style={styles.menuWrap} ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((prev) => !prev)}
+                  style={styles.menuButton}
+                >
+                  ☰ Menu
+                </button>
+
+                {menuOpen ? (
+                  <div style={styles.menuDropdown}>
+                    <button
+                      type="button"
+                      style={styles.menuItem}
+                      onClick={() => handleMenuAction("review-wrong")}
+                    >
+                      Review wrong answers
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.menuItem}
+                      onClick={() => handleMenuAction("review-studied")}
+                    >
+                      Shuffle 10 studied kanji
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.menuItem}
+                      onClick={() => handleMenuAction("normal")}
+                    >
+                      Back to normal lesson
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              <div style={styles.metaBox}>
+                <div style={styles.metaLabel}>
+                  {phase === "main" ? "Set progress" : "Review"}
+                </div>
+                <div style={styles.metaValue}>{progressLabel}</div>
+              </div>
+            </div>
+
+            <h1 style={styles.title}>
+              Which of the following is closest in meaning to this kanji?
+            </h1>
+          </div>
+        </div>
+
+        <div style={styles.gridArea}>
+          <div style={styles.contentWrap}>
+            <div style={styles.stickyShadow} />
+            <div style={styles.stickyNote}>
+              <div style={styles.stickyFold} />
+              <div style={styles.kanji}>{currentQuestion.kanji}</div>
+            </div>
+
+            <div style={styles.optionsGrid}>
+              {currentQuestion.options.map((option, index) => {
+                const selectedThis = selected === option.label;
+                const showCorrect = checked && option.isCorrect;
+                const showWrong = checked && selectedThis && !option.isCorrect;
+
+                let optionStyle = {
+                  ...styles.optionButton,
+                  ...(index % 2 === 0 ? styles.optionLeft : styles.optionRight),
+                };
+
+                if (!checked && selectedThis) {
+                  optionStyle = {
+                    ...optionStyle,
+                    ...styles.optionSelected,
+                  };
+                }
+
+                if (showCorrect) {
+                  optionStyle = {
+                    ...optionStyle,
+                    ...styles.optionCorrect,
+                  };
+                }
+
+                if (showWrong) {
+                  optionStyle = {
+                    ...optionStyle,
+                    ...styles.optionWrong,
+                  };
+                }
+
+                return (
+                  <button
+                    key={`${currentQuestion.kanji}-${index}-${option.label}`}
+                    type="button"
+                    onClick={() => {
+                      if (checked) return;
+                      setSelected(option.label);
+                    }}
+                    style={optionStyle}
+                  >
+                    <span style={styles.optionIndex}>
+                      {["①", "②", "③", "④"][index]}
+                    </span>
+                    <span style={styles.optionText}>{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={styles.feedbackBox}>
+              {!checked ? (
+                <p style={styles.feedbackText}>
+                  Choose one answer, then press “Next” to check if it is correct.
+                </p>
+              ) : wasCorrect ? (
+                <p style={{ ...styles.feedbackText, color: "#138a36" }}>
+                  ⭕ Correct!
+                </p>
+              ) : (
+                <div>
+                  <p
+                    style={{
+                      ...styles.feedbackText,
+                      color: "#c62828",
+                      marginBottom: 8,
+                    }}
+                  >
+                    ❌ Incorrect
+                  </p>
+                  <p style={styles.correctAnswerText}>
+                    Correct answer: {currentQuestion.correctAnswer}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div style={styles.nextWrap}>
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={saving || (!checked && !selected)}
+                style={{
+                  ...styles.nextButton,
+                  ...(saving || (!checked && !selected)
+                    ? styles.nextButtonDisabled
+                    : {}),
+                }}
+              >
+                {saving
+                  ? "Saving..."
+                  : checked
+                  ? phase === "main"
+                    ? "Next Question"
+                    : "Continue Review"
+                  : "Next"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    height: "100dvh",
+    overflow: "hidden",
+    background: "#efefef",
+    color: "#111",
+    fontFamily:
+      'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  },
+  appFrame: {
+    height: "100%",
+    display: "grid",
+    gridTemplateRows: "170px minmax(0, 1fr)",
+  },
+  centerWrap: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  loadingCard: {
+    background: "#fff",
+    padding: "24px 28px",
+    borderRadius: 24,
+    fontSize: 28,
+    fontWeight: 800,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+  },
+  errorCard: {
+    background: "#fff0f0",
+    color: "#a40000",
+    padding: "24px 28px",
+    borderRadius: 24,
+    fontSize: 24,
+    fontWeight: 800,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+    maxWidth: 900,
+  },
+  finishCard: {
+    background: "#fff",
+    padding: "34px 30px",
+    borderRadius: 28,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+    textAlign: "center",
+    minWidth: 320,
+  },
+  finishTitle: {
+    margin: 0,
+    fontSize: 34,
+    fontWeight: 900,
+    color: "#111",
+  },
+  finishText: {
+    margin: "14px 0 0",
+    fontSize: 20,
+    fontWeight: 700,
+    color: "#333",
+  },
+  finishButton: {
+    marginTop: 22,
+    border: "none",
+    borderRadius: 999,
+    background: "#111",
+    color: "#fff",
+    padding: "14px 26px",
+    fontSize: 18,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
+  },
+  setCompleteCard: {
+    background: "#fff",
+    padding: "34px 30px",
+    borderRadius: 28,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+    textAlign: "center",
+    minWidth: 340,
+    maxWidth: 540,
+    width: "100%",
+  },
+  setCompleteTitle: {
+    margin: 0,
+    fontSize: 34,
+    fontWeight: 900,
+    color: "#111",
+  },
+  setCompleteText: {
+    margin: "12px 0 0",
+    fontSize: 20,
+    fontWeight: 700,
+    color: "#333",
+  },
+  setCompleteScore: {
+    margin: "10px 0 0",
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#222",
+  },
+  setCompleteButtons: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 14,
+    marginTop: 24,
+    flexWrap: "wrap",
+  },
+  setCompletePrimaryButton: {
+    border: "none",
+    borderRadius: 999,
+    background: "#111",
+    color: "#fff",
+    padding: "14px 24px",
+    fontSize: 18,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
+  },
+  setCompleteSecondaryButton: {
+    border: "none",
+    borderRadius: 999,
+    background: "#d9d9d9",
+    color: "#111",
+    padding: "14px 24px",
+    fontSize: 18,
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  reviewWrongButton: {
+    marginTop: 16,
+    border: "none",
+    borderRadius: 999,
+    background: "#0f9b99",
+    color: "#fff",
+    padding: "12px 22px",
+    fontSize: 16,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
+  },
+  topArea: {
+    background: "#0f9b99",
+    padding: "14px 18px 52px",
+  },
+  topInner: {
+    maxWidth: 1180,
+    margin: "0 auto",
+  },
+  metaRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 16,
+    marginBottom: 8,
+    flexWrap: "wrap",
+  },
+  metaBox: {
+    color: "#ffffff",
+    fontWeight: 700,
+  },
+  metaLabel: {
+    fontSize: 16,
+    lineHeight: 1.15,
+    opacity: 0.95,
+  },
+  metaValue: {
+    fontSize: 18,
+    lineHeight: 1.15,
+    marginTop: 3,
+  },
+  title: {
+    margin: 0,
+    textAlign: "center",
+    color: "#111",
+    fontSize: "clamp(20px, 2.1vw, 34px)",
+    fontWeight: 900,
+    lineHeight: 1.08,
+    letterSpacing: "-0.02em",
+  },
+  menuWrap: {
+    position: "relative",
+  },
+  menuButton: {
+    border: "none",
+    borderRadius: 999,
+    background: "#111",
+    color: "#fff",
+    padding: "10px 16px",
+    fontSize: 16,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
+  },
+  menuDropdown: {
+    position: "absolute",
+    top: "100%",
+    right: 0,
+    marginTop: 10,
+    minWidth: 260,
+    background: "#fff",
+    borderRadius: 18,
+    boxShadow: "0 16px 34px rgba(0,0,0,0.14)",
+    overflow: "hidden",
+    zIndex: 30,
+  },
+  menuItem: {
+    width: "100%",
+    border: "none",
+    background: "#fff",
+    color: "#111",
+    fontSize: 16,
+    fontWeight: 800,
+    textAlign: "left",
+    padding: "14px 16px",
+    cursor: "pointer",
+    borderBottom: "1px solid #ececec",
+  },
+  gridArea: {
+    marginTop: -26,
+    minHeight: 0,
+    overflow: "hidden",
+    backgroundColor: "#efefef",
+    backgroundImage:
+      "linear-gradient(#dddddd 2px, transparent 2px), linear-gradient(90deg, #dddddd 2px, transparent 2px)",
+    backgroundSize: "110px 110px",
+    padding: "0 16px 14px",
+  },
+  contentWrap: {
+    maxWidth: 1180,
+    height: "100%",
+    margin: "0 auto",
+    display: "grid",
+    gridTemplateRows: "auto auto auto auto",
+    alignContent: "start",
+  },
+  stickyShadow: {
+    width: "min(240px, 38vw)",
+    height: "min(240px, 38vw)",
+    background: "#85d4c8",
+    margin: "0 auto",
+    transform: "translate(10px, 10px)",
+    borderRadius: 6,
+  },
+  stickyNote: {
+    width: "min(240px, 38vw)",
+    height: "min(240px, 38vw)",
+    background: "#c7e8cb",
+    margin: "-240px auto 14px",
+    position: "relative",
+    borderRadius: 6,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 16px 30px rgba(0,0,0,0.08)",
+  },
+  stickyFold: {
+    position: "absolute",
+    left: 0,
+    bottom: 0,
+    width: "28%",
+    height: "28%",
+    background: "#efefef",
+    borderTopRightRadius: 999,
+  },
+  kanji: {
+    fontSize: "clamp(84px, 10vw, 150px)",
+    fontWeight: 900,
+    lineHeight: 1,
+    color: "#000",
+    position: "relative",
+    zIndex: 1,
+  },
+  optionsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(240px, 1fr))",
+    gap: 16,
+    alignItems: "stretch",
+    marginTop: 0,
+  },
+  optionLeft: {},
+  optionRight: {},
+  optionButton: {
+    border: "none",
+    borderRadius: 26,
+    background: "#e9c46c",
+    color: "#111",
+    padding: "18px 22px",
+    fontSize: "clamp(18px, 1.45vw, 28px)",
+    fontWeight: 900,
+    lineHeight: 1.15,
+    textAlign: "left",
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(0,0,0,0.08)",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    transition: "transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease",
+    minHeight: 82,
+  },
+  optionSelected: {
+    background: "#f6d98d",
+    boxShadow: "0 0 0 5px #111 inset, 0 8px 18px rgba(0,0,0,0.08)",
+    transform: "translateY(-2px)",
+  },
+  optionCorrect: {
+    background: "#bde7bf",
+    boxShadow: "0 0 0 5px #138a36 inset, 0 8px 18px rgba(0,0,0,0.08)",
+  },
+  optionWrong: {
+    background: "#f5b7b1",
+    boxShadow: "0 0 0 5px #c62828 inset, 0 8px 18px rgba(0,0,0,0.08)",
+  },
+  optionIndex: {
+    flexShrink: 0,
+  },
+  optionText: {
+    display: "inline-block",
+    wordBreak: "break-word",
+  },
+  feedbackBox: {
+    maxWidth: 900,
+    margin: "12px auto 0",
+    background: "#fff",
+    borderRadius: 20,
+    padding: "14px 18px",
+    boxShadow: "0 8px 20px rgba(0,0,0,0.06)",
+  },
+  feedbackText: {
+    margin: 0,
+    fontSize: "clamp(16px, 1.1vw, 22px)",
+    fontWeight: 800,
+    color: "#333",
+    lineHeight: 1.3,
+    textAlign: "center",
+  },
+  correctAnswerText: {
+    margin: 0,
+    fontSize: "clamp(16px, 1.05vw, 21px)",
+    fontWeight: 800,
+    color: "#222",
+    textAlign: "center",
+    lineHeight: 1.3,
+  },
+  nextWrap: {
+    display: "flex",
+    justifyContent: "center",
+    marginTop: 12,
+  },
+  nextButton: {
+    border: "none",
+    borderRadius: 999,
+    background: "#111",
+    color: "#fff",
+    padding: "12px 28px",
+    fontSize: 20,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
+  },
+  nextButtonDisabled: {
+    opacity: 0.35,
+    cursor: "not-allowed",
+  },
+};
