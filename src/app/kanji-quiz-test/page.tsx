@@ -61,7 +61,22 @@ export default function KanjiQuizTestPage() {
   const [lastSetCorrectCount, setLastSetCorrectCount] = useState(0);
   const [lastSetWrongCount, setLastSetWrongCount] = useState(0);
 
+  const [windowWidth, setWindowWidth] = useState(1200);
+
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handleResize() {
+      setWindowWidth(window.innerWidth);
+    }
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const isMobile = windowWidth <= 768;
+  const isSmallMobile = windowWidth <= 430;
 
   async function loadBatch(mode: QuizMode = "normal") {
     setLoading(true);
@@ -262,6 +277,44 @@ export default function KanjiQuizTestPage() {
     setShowFinishMessage(true);
   }
 
+  function getOptionStyle(option: QuizOption, index: number): React.CSSProperties {
+    const selectedThis = selected === option.label;
+    const showCorrect = checked && option.isCorrect;
+    const showWrong = checked && selectedThis && !option.isCorrect;
+
+    let optionStyle: React.CSSProperties = {
+      ...styles.optionButton,
+      fontSize: isMobile ? (isSmallMobile ? 13 : 15) : 24,
+      padding: isMobile ? (isSmallMobile ? "12px 12px" : "14px 14px") : "18px 22px",
+      minHeight: isMobile ? (isSmallMobile ? 72 : 78) : 82,
+      borderRadius: isMobile ? 20 : 26,
+      gap: isMobile ? 6 : 8,
+    };
+
+    if (!checked && selectedThis) {
+      optionStyle = {
+        ...optionStyle,
+        ...styles.optionSelected,
+      };
+    }
+
+    if (showCorrect) {
+      optionStyle = {
+        ...optionStyle,
+        ...styles.optionCorrect,
+      };
+    }
+
+    if (showWrong) {
+      optionStyle = {
+        ...optionStyle,
+        ...styles.optionWrong,
+      };
+    }
+
+    return optionStyle;
+  }
+
   if (loading) {
     return (
       <main style={styles.page}>
@@ -286,13 +339,37 @@ export default function KanjiQuizTestPage() {
     return (
       <main style={styles.page}>
         <div style={styles.centerWrap}>
-          <div style={styles.finishCard}>
-            <h2 style={styles.finishTitle}>Great work today!</h2>
-            <p style={styles.finishText}>You can stop here and come back anytime.</p>
+          <div
+            style={{
+              ...styles.finishCard,
+              width: isMobile ? "92%" : undefined,
+              padding: isMobile ? "26px 20px" : "34px 30px",
+            }}
+          >
+            <h2
+              style={{
+                ...styles.finishTitle,
+                fontSize: isMobile ? 28 : 34,
+              }}
+            >
+              Great work today!
+            </h2>
+            <p
+              style={{
+                ...styles.finishText,
+                fontSize: isMobile ? 16 : 20,
+              }}
+            >
+              You can stop here and come back anytime.
+            </p>
             <button
               type="button"
               onClick={() => loadBatch("normal")}
-              style={styles.finishButton}
+              style={{
+                ...styles.finishButton,
+                fontSize: isMobile ? 16 : 18,
+                padding: isMobile ? "12px 20px" : "14px 26px",
+              }}
             >
               Start again
             </button>
@@ -306,28 +383,72 @@ export default function KanjiQuizTestPage() {
     return (
       <main style={styles.page}>
         <div style={styles.centerWrap}>
-          <div style={styles.setCompleteCard}>
-            <h2 style={styles.setCompleteTitle}>Set complete!</h2>
-            <p style={styles.setCompleteText}>You finished 5 questions.</p>
-            <p style={styles.setCompleteScore}>
+          <div
+            style={{
+              ...styles.setCompleteCard,
+              width: isMobile ? "92%" : "100%",
+              padding: isMobile ? "26px 20px" : "34px 30px",
+            }}
+          >
+            <h2
+              style={{
+                ...styles.setCompleteTitle,
+                fontSize: isMobile ? 28 : 34,
+              }}
+            >
+              Set complete!
+            </h2>
+            <p
+              style={{
+                ...styles.setCompleteText,
+                fontSize: isMobile ? 16 : 20,
+              }}
+            >
+              You finished 5 questions.
+            </p>
+            <p
+              style={{
+                ...styles.setCompleteScore,
+                fontSize: isMobile ? 15 : 18,
+              }}
+            >
               Correct: {lastSetCorrectCount} / 5
             </p>
-            <p style={styles.setCompleteScore}>
+            <p
+              style={{
+                ...styles.setCompleteScore,
+                fontSize: isMobile ? 15 : 18,
+              }}
+            >
               Wrong answers: {lastSetWrongCount}
             </p>
 
-            <div style={styles.setCompleteButtons}>
+            <div
+              style={{
+                ...styles.setCompleteButtons,
+                flexDirection: isMobile ? "column" : "row",
+                alignItems: "center",
+              }}
+            >
               <button
                 type="button"
                 onClick={handleDoFiveMore}
-                style={styles.setCompletePrimaryButton}
+                style={{
+                  ...styles.setCompletePrimaryButton,
+                  width: isMobile ? "100%" : undefined,
+                  fontSize: isMobile ? 16 : 18,
+                }}
               >
                 Do 5 more
               </button>
               <button
                 type="button"
                 onClick={handleFinishForToday}
-                style={styles.setCompleteSecondaryButton}
+                style={{
+                  ...styles.setCompleteSecondaryButton,
+                  width: isMobile ? "100%" : undefined,
+                  fontSize: isMobile ? 16 : 18,
+                }}
               >
                 Finish for today
               </button>
@@ -337,7 +458,10 @@ export default function KanjiQuizTestPage() {
               <button
                 type="button"
                 onClick={() => loadBatch("review-wrong")}
-                style={styles.reviewWrongButton}
+                style={{
+                  ...styles.reviewWrongButton,
+                  width: isMobile ? "100%" : undefined,
+                }}
               >
                 Review wrong answers
               </button>
@@ -360,43 +484,98 @@ export default function KanjiQuizTestPage() {
 
   return (
     <main style={styles.page}>
-      <div style={styles.appFrame}>
-        <div style={styles.topArea}>
+      <div
+        style={{
+          ...styles.appFrame,
+          gridTemplateRows: isMobile ? "150px minmax(0, 1fr)" : "170px minmax(0, 1fr)",
+        }}
+      >
+        <div
+          style={{
+            ...styles.topArea,
+            padding: isMobile ? "12px 12px 34px" : "14px 18px 52px",
+          }}
+        >
           <div style={styles.topInner}>
-            <div style={styles.metaRow}>
+            <div
+              style={{
+                ...styles.metaRow,
+                gap: isMobile ? 8 : 16,
+                marginBottom: isMobile ? 6 : 8,
+                alignItems: "center",
+              }}
+            >
               <div style={styles.metaBox}>
-                <div style={styles.metaLabel}>Unit</div>
-                <div style={styles.metaValue}>{batch.unit}</div>
+                <div
+                  style={{
+                    ...styles.metaLabel,
+                    fontSize: isMobile ? 12 : 16,
+                  }}
+                >
+                  Unit
+                </div>
+                <div
+                  style={{
+                    ...styles.metaValue,
+                    fontSize: isMobile ? 14 : 18,
+                    maxWidth: isMobile ? 110 : undefined,
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {batch.unit}
+                </div>
               </div>
 
               <div style={styles.menuWrap} ref={menuRef}>
                 <button
                   type="button"
                   onClick={() => setMenuOpen((prev) => !prev)}
-                  style={styles.menuButton}
+                  style={{
+                    ...styles.menuButton,
+                    padding: isMobile ? "8px 14px" : "10px 16px",
+                    fontSize: isMobile ? 14 : 16,
+                  }}
                 >
                   ☰ Menu
                 </button>
 
                 {menuOpen ? (
-                  <div style={styles.menuDropdown}>
+                  <div
+                    style={{
+                      ...styles.menuDropdown,
+                      minWidth: isMobile ? 220 : 260,
+                      right: 0,
+                    }}
+                  >
                     <button
                       type="button"
-                      style={styles.menuItem}
+                      style={{
+                        ...styles.menuItem,
+                        fontSize: isMobile ? 14 : 16,
+                        padding: isMobile ? "12px 14px" : "14px 16px",
+                      }}
                       onClick={() => handleMenuAction("review-wrong")}
                     >
                       Review wrong answers
                     </button>
                     <button
                       type="button"
-                      style={styles.menuItem}
+                      style={{
+                        ...styles.menuItem,
+                        fontSize: isMobile ? 14 : 16,
+                        padding: isMobile ? "12px 14px" : "14px 16px",
+                      }}
                       onClick={() => handleMenuAction("review-studied")}
                     >
                       Shuffle 10 studied kanji
                     </button>
                     <button
                       type="button"
-                      style={styles.menuItem}
+                      style={{
+                        ...styles.menuItem,
+                        fontSize: isMobile ? 14 : 16,
+                        padding: isMobile ? "12px 14px" : "14px 16px",
+                      }}
                       onClick={() => handleMenuAction("normal")}
                     >
                       Back to normal lesson
@@ -405,86 +584,148 @@ export default function KanjiQuizTestPage() {
                 ) : null}
               </div>
 
-              <div style={styles.metaBox}>
-                <div style={styles.metaLabel}>
+              <div style={{ ...styles.metaBox, textAlign: "right" }}>
+                <div
+                  style={{
+                    ...styles.metaLabel,
+                    fontSize: isMobile ? 12 : 16,
+                  }}
+                >
                   {phase === "main" ? "Set progress" : "Review"}
                 </div>
-                <div style={styles.metaValue}>{progressLabel}</div>
+                <div
+                  style={{
+                    ...styles.metaValue,
+                    fontSize: isMobile ? 14 : 18,
+                  }}
+                >
+                  {progressLabel}
+                </div>
               </div>
             </div>
 
-            <h1 style={styles.title}>
+            <h1
+              style={{
+                ...styles.title,
+                fontSize: isMobile
+                  ? isSmallMobile
+                    ? 16
+                    : 18
+                  : 34,
+                lineHeight: isMobile ? 1.15 : 1.08,
+                maxWidth: 900,
+                marginLeft: "auto",
+                marginRight: "auto",
+              }}
+            >
               Which of the following is closest in meaning to this kanji?
             </h1>
           </div>
         </div>
 
-        <div style={styles.gridArea}>
+        <div
+          style={{
+            ...styles.gridArea,
+            marginTop: isMobile ? -12 : -26,
+            padding: isMobile ? "0 10px 10px" : "0 16px 14px",
+          }}
+        >
           <div style={styles.contentWrap}>
-            <div style={styles.stickyShadow} />
-            <div style={styles.stickyNote}>
+            <div
+              style={{
+                ...styles.stickyShadow,
+                width: isMobile ? (isSmallMobile ? 118 : 132) : "min(240px, 38vw)",
+                height: isMobile ? (isSmallMobile ? 118 : 132) : "min(240px, 38vw)",
+                transform: isMobile ? "translate(6px, 6px)" : "translate(10px, 10px)",
+              }}
+            />
+            <div
+              style={{
+                ...styles.stickyNote,
+                width: isMobile ? (isSmallMobile ? 118 : 132) : "min(240px, 38vw)",
+                height: isMobile ? (isSmallMobile ? 118 : 132) : "min(240px, 38vw)",
+                margin: isMobile
+                  ? `${isSmallMobile ? -118 : -132}px auto 10px`
+                  : "-240px auto 14px",
+              }}
+            >
               <div style={styles.stickyFold} />
-              <div style={styles.kanji}>{currentQuestion.kanji}</div>
+              <div
+                style={{
+                  ...styles.kanji,
+                  fontSize: isMobile
+                    ? isSmallMobile
+                      ? 64
+                      : 72
+                    : 150,
+                }}
+              >
+                {currentQuestion.kanji}
+              </div>
             </div>
 
-            <div style={styles.optionsGrid}>
-              {currentQuestion.options.map((option, index) => {
-                const selectedThis = selected === option.label;
-                const showCorrect = checked && option.isCorrect;
-                const showWrong = checked && selectedThis && !option.isCorrect;
-
-                let optionStyle = {
-                  ...styles.optionButton,
-                  ...(index % 2 === 0 ? styles.optionLeft : styles.optionRight),
-                };
-
-                if (!checked && selectedThis) {
-                  optionStyle = {
-                    ...optionStyle,
-                    ...styles.optionSelected,
-                  };
-                }
-
-                if (showCorrect) {
-                  optionStyle = {
-                    ...optionStyle,
-                    ...styles.optionCorrect,
-                  };
-                }
-
-                if (showWrong) {
-                  optionStyle = {
-                    ...optionStyle,
-                    ...styles.optionWrong,
-                  };
-                }
-
-                return (
-                  <button
-                    key={`${currentQuestion.kanji}-${index}-${option.label}`}
-                    type="button"
-                    onClick={() => {
-                      if (checked) return;
-                      setSelected(option.label);
+            <div
+              style={{
+                ...styles.optionsGrid,
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: isMobile ? 10 : 16,
+              }}
+            >
+              {currentQuestion.options.map((option, index) => (
+                <button
+                  key={`${currentQuestion.kanji}-${index}-${option.label}`}
+                  type="button"
+                  onClick={() => {
+                    if (checked) return;
+                    setSelected(option.label);
+                  }}
+                  style={getOptionStyle(option, index)}
+                >
+                  <span
+                    style={{
+                      ...styles.optionIndex,
+                      fontSize: isMobile ? (isSmallMobile ? 12 : 14) : 22,
                     }}
-                    style={optionStyle}
                   >
-                    <span style={styles.optionIndex}>
-                      {["①", "②", "③", "④"][index]}
-                    </span>
-                    <span style={styles.optionText}>{option.label}</span>
-                  </button>
-                );
-              })}
+                    {["①", "②", "③", "④"][index]}
+                  </span>
+                  <span
+                    style={{
+                      ...styles.optionText,
+                      lineHeight: 1.15,
+                    }}
+                  >
+                    {option.label}
+                  </span>
+                </button>
+              ))}
             </div>
 
-            <div style={styles.feedbackBox}>
+            <div
+              style={{
+                ...styles.feedbackBox,
+                marginTop: isMobile ? 10 : 12,
+                padding: isMobile ? "10px 12px" : "14px 18px",
+                borderRadius: isMobile ? 16 : 20,
+              }}
+            >
               {!checked ? (
-                <p style={styles.feedbackText}>
+                <p
+                  style={{
+                    ...styles.feedbackText,
+                    fontSize: isMobile ? (isSmallMobile ? 12 : 13) : 22,
+                  }}
+                >
                   Choose one answer, then press “Next” to check if it is correct.
                 </p>
               ) : wasCorrect ? (
-                <p style={{ ...styles.feedbackText, color: "#138a36" }}>
+                <p
+                  style={{
+                    ...styles.feedbackText,
+                    color: "#138a36",
+                    fontSize: isMobile ? (isSmallMobile ? 12 : 13) : 22,
+                  }}
+                >
                   ⭕ Correct!
                 </p>
               ) : (
@@ -493,19 +734,30 @@ export default function KanjiQuizTestPage() {
                     style={{
                       ...styles.feedbackText,
                       color: "#c62828",
-                      marginBottom: 8,
+                      marginBottom: 6,
+                      fontSize: isMobile ? (isSmallMobile ? 12 : 13) : 22,
                     }}
                   >
                     ❌ Incorrect
                   </p>
-                  <p style={styles.correctAnswerText}>
+                  <p
+                    style={{
+                      ...styles.correctAnswerText,
+                      fontSize: isMobile ? (isSmallMobile ? 12 : 13) : 21,
+                    }}
+                  >
                     Correct answer: {currentQuestion.correctAnswer}
                   </p>
                 </div>
               )}
             </div>
 
-            <div style={styles.nextWrap}>
+            <div
+              style={{
+                ...styles.nextWrap,
+                marginTop: isMobile ? 10 : 12,
+              }}
+            >
               <button
                 type="button"
                 onClick={handleNext}
@@ -515,6 +767,8 @@ export default function KanjiQuizTestPage() {
                   ...(saving || (!checked && !selected)
                     ? styles.nextButtonDisabled
                     : {}),
+                  fontSize: isMobile ? 16 : 20,
+                  padding: isMobile ? "10px 24px" : "12px 28px",
                 }}
               >
                 {saving
@@ -535,20 +789,18 @@ export default function KanjiQuizTestPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    height: "100dvh",
-    overflow: "hidden",
+    minHeight: "100dvh",
     background: "#efefef",
     color: "#111",
     fontFamily:
       'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   appFrame: {
-    height: "100%",
+    minHeight: "100dvh",
     display: "grid",
-    gridTemplateRows: "170px minmax(0, 1fr)",
   },
   centerWrap: {
-    minHeight: "100vh",
+    minHeight: "100dvh",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -574,7 +826,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   finishCard: {
     background: "#fff",
-    padding: "34px 30px",
     borderRadius: 28,
     boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
     textAlign: "center",
@@ -582,13 +833,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   finishTitle: {
     margin: 0,
-    fontSize: 34,
     fontWeight: 900,
     color: "#111",
   },
   finishText: {
     margin: "14px 0 0",
-    fontSize: 20,
     fontWeight: 700,
     color: "#333",
   },
@@ -598,37 +847,30 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 999,
     background: "#111",
     color: "#fff",
-    padding: "14px 26px",
-    fontSize: 18,
     fontWeight: 900,
     cursor: "pointer",
     boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
   },
   setCompleteCard: {
     background: "#fff",
-    padding: "34px 30px",
     borderRadius: 28,
     boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
     textAlign: "center",
     minWidth: 340,
     maxWidth: 540,
-    width: "100%",
   },
   setCompleteTitle: {
     margin: 0,
-    fontSize: 34,
     fontWeight: 900,
     color: "#111",
   },
   setCompleteText: {
     margin: "12px 0 0",
-    fontSize: 20,
     fontWeight: 700,
     color: "#333",
   },
   setCompleteScore: {
     margin: "10px 0 0",
-    fontSize: 18,
     fontWeight: 800,
     color: "#222",
   },
@@ -645,7 +887,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#111",
     color: "#fff",
     padding: "14px 24px",
-    fontSize: 18,
     fontWeight: 900,
     cursor: "pointer",
     boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
@@ -656,7 +897,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#d9d9d9",
     color: "#111",
     padding: "14px 24px",
-    fontSize: 18,
     fontWeight: 900,
     cursor: "pointer",
   },
@@ -674,7 +914,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   topArea: {
     background: "#0f9b99",
-    padding: "14px 18px 52px",
   },
   topInner: {
     maxWidth: 1180,
@@ -683,32 +922,24 @@ const styles: Record<string, React.CSSProperties> = {
   metaRow: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 16,
-    marginBottom: 8,
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
   },
   metaBox: {
     color: "#ffffff",
     fontWeight: 700,
   },
   metaLabel: {
-    fontSize: 16,
     lineHeight: 1.15,
     opacity: 0.95,
   },
   metaValue: {
-    fontSize: 18,
     lineHeight: 1.15,
     marginTop: 3,
   },
   title: {
-    margin: 0,
     textAlign: "center",
     color: "#111",
-    fontSize: "clamp(20px, 2.1vw, 34px)",
     fontWeight: 900,
-    lineHeight: 1.08,
     letterSpacing: "-0.02em",
   },
   menuWrap: {
@@ -719,8 +950,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 999,
     background: "#111",
     color: "#fff",
-    padding: "10px 16px",
-    fontSize: 16,
     fontWeight: 900,
     cursor: "pointer",
     boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
@@ -728,9 +957,7 @@ const styles: Record<string, React.CSSProperties> = {
   menuDropdown: {
     position: "absolute",
     top: "100%",
-    right: 0,
     marginTop: 10,
-    minWidth: 260,
     background: "#fff",
     borderRadius: 18,
     boxShadow: "0 16px 34px rgba(0,0,0,0.14)",
@@ -742,44 +969,32 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
     background: "#fff",
     color: "#111",
-    fontSize: 16,
     fontWeight: 800,
     textAlign: "left",
-    padding: "14px 16px",
     cursor: "pointer",
     borderBottom: "1px solid #ececec",
   },
   gridArea: {
-    marginTop: -26,
     minHeight: 0,
-    overflow: "hidden",
     backgroundColor: "#efefef",
     backgroundImage:
       "linear-gradient(#dddddd 2px, transparent 2px), linear-gradient(90deg, #dddddd 2px, transparent 2px)",
     backgroundSize: "110px 110px",
-    padding: "0 16px 14px",
   },
   contentWrap: {
     maxWidth: 1180,
-    height: "100%",
     margin: "0 auto",
     display: "grid",
     gridTemplateRows: "auto auto auto auto",
     alignContent: "start",
   },
   stickyShadow: {
-    width: "min(240px, 38vw)",
-    height: "min(240px, 38vw)",
     background: "#85d4c8",
     margin: "0 auto",
-    transform: "translate(10px, 10px)",
     borderRadius: 6,
   },
   stickyNote: {
-    width: "min(240px, 38vw)",
-    height: "min(240px, 38vw)",
     background: "#c7e8cb",
-    margin: "-240px auto 14px",
     position: "relative",
     borderRadius: 6,
     display: "flex",
@@ -797,7 +1012,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderTopRightRadius: 999,
   },
   kanji: {
-    fontSize: "clamp(84px, 10vw, 150px)",
     fontWeight: 900,
     lineHeight: 1,
     color: "#000",
@@ -806,20 +1020,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   optionsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(240px, 1fr))",
-    gap: 16,
     alignItems: "stretch",
-    marginTop: 0,
   },
-  optionLeft: {},
-  optionRight: {},
   optionButton: {
     border: "none",
-    borderRadius: 26,
     background: "#e9c46c",
     color: "#111",
-    padding: "18px 22px",
-    fontSize: "clamp(18px, 1.45vw, 28px)",
     fontWeight: 900,
     lineHeight: 1.15,
     textAlign: "left",
@@ -827,9 +1033,8 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 8px 18px rgba(0,0,0,0.08)",
     display: "flex",
     alignItems: "center",
-    gap: 8,
     transition: "transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease",
-    minHeight: 82,
+    minWidth: 0,
   },
   optionSelected: {
     background: "#f6d98d",
@@ -846,22 +1051,21 @@ const styles: Record<string, React.CSSProperties> = {
   },
   optionIndex: {
     flexShrink: 0,
+    fontWeight: 900,
   },
   optionText: {
     display: "inline-block",
     wordBreak: "break-word",
+    overflowWrap: "anywhere",
+    minWidth: 0,
   },
   feedbackBox: {
     maxWidth: 900,
-    margin: "12px auto 0",
     background: "#fff",
-    borderRadius: 20,
-    padding: "14px 18px",
     boxShadow: "0 8px 20px rgba(0,0,0,0.06)",
   },
   feedbackText: {
     margin: 0,
-    fontSize: "clamp(16px, 1.1vw, 22px)",
     fontWeight: 800,
     color: "#333",
     lineHeight: 1.3,
@@ -869,7 +1073,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   correctAnswerText: {
     margin: 0,
-    fontSize: "clamp(16px, 1.05vw, 21px)",
     fontWeight: 800,
     color: "#222",
     textAlign: "center",
@@ -878,15 +1081,12 @@ const styles: Record<string, React.CSSProperties> = {
   nextWrap: {
     display: "flex",
     justifyContent: "center",
-    marginTop: 12,
   },
   nextButton: {
     border: "none",
     borderRadius: 999,
     background: "#111",
     color: "#fff",
-    padding: "12px 28px",
-    fontSize: 20,
     fontWeight: 900,
     cursor: "pointer",
     boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
