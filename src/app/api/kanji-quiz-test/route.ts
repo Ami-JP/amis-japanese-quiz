@@ -180,14 +180,15 @@ function makeQuizItems(sourceRows: KanjiHintRow[], pool: KanjiHintRow[]) {
 }
 
 async function moveToNextUnitIfNeeded(params: {
-  supabase: ReturnType<typeof createClient>;
+  supabase: any;
   accountId: string;
   currentUnit: string;
   newLastOrderCompleted: number;
 }) {
   const { supabase, accountId, currentUnit, newLastOrderCompleted } = params;
+  const db = supabase as any;
 
-  const { count: remainingCount, error: remainingError } = await supabase
+  const { count: remainingCount, error: remainingError } = await db
     .from("kanji_hints")
     .select("*", { count: "exact", head: true })
     .eq("unit", currentUnit)
@@ -202,20 +203,23 @@ async function moveToNextUnitIfNeeded(params: {
     return { nextUnit: null };
   }
 
-  const { error: completeProgressError } = await supabase
+  const completeProgressRow = {
+    student_account_id: accountId,
+    unit: currentUnit,
+    last_order_completed: newLastOrderCompleted,
+    last_studied_at: new Date().toISOString(),
+    is_completed: true,
+  };
+
+  const { error: completeProgressError } = await db
     .from("student_kanji_progress")
-    .update({
-      is_completed: true,
-      last_studied_at: new Date().toISOString(),
-    })
-    .eq("student_account_id", accountId)
-    .eq("unit", currentUnit);
+    .upsert(completeProgressRow);
 
   if (completeProgressError) {
     throw new Error(completeProgressError.message);
   }
 
-  const { data: nextUnitRow, error: nextUnitError } = await supabase
+  const { data: nextUnitRowRaw, error: nextUnitError } = await db
     .from("kanji_hints")
     .select("unit")
     .eq("is_published", true)
@@ -228,13 +232,15 @@ async function moveToNextUnitIfNeeded(params: {
     throw new Error(nextUnitError.message);
   }
 
+  const nextUnitRow = nextUnitRowRaw as { unit: string | null } | null;
+
   if (!nextUnitRow?.unit) {
     return { nextUnit: null };
   }
 
   const nextUnit = nextUnitRow.unit;
 
-  const { error: updateAccountError } = await supabase
+  const { error: updateAccountError } = await db
     .from("student_accounts")
     .update({ current_unit: nextUnit })
     .eq("id", accountId);
@@ -243,15 +249,17 @@ async function moveToNextUnitIfNeeded(params: {
     throw new Error(updateAccountError.message);
   }
 
-  const { error: nextProgressError } = await supabase
+  const nextProgressRow = {
+    student_account_id: accountId,
+    unit: nextUnit,
+    last_order_completed: 0,
+    last_studied_at: null,
+    is_completed: false,
+  };
+
+  const { error: nextProgressError } = await db
     .from("student_kanji_progress")
-    .upsert({
-      student_account_id: accountId,
-      unit: nextUnit,
-      last_order_completed: 0,
-      last_studied_at: null,
-      is_completed: false,
-    });
+    .upsert(nextProgressRow);
 
   if (nextProgressError) {
     throw new Error(nextProgressError.message);
@@ -284,13 +292,16 @@ function getLatestWrongKanji(attempts: AttemptHistoryRow[]) {
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
+    const db = supabase as any;
     const mode = request.nextUrl.searchParams.get("mode") ?? "normal";
 
-    const { data: account, error: accountError } = await supabase
+    const { data: accountRaw, error: accountError } = await db
       .from("student_accounts")
       .select("id, student_login_id, display_name, is_active, current_unit")
       .eq("student_login_id", TEST_LOGIN_ID)
-      .single<StudentAccount>();
+      .single();
+
+    const account = accountRaw as StudentAccount | null;
 
     if (accountError || !account) {
       return NextResponse.json(
@@ -313,42 +324,41 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { data: progress } = await supabase
+    const { data: progressRaw } = await db
       .from("student_kanji_progress")
       .select(
         "student_account_id, unit, last_order_completed, last_studied_at, is_completed"
       )
       .eq("student_account_id", account.id)
       .eq("unit", account.current_unit)
-      .single<StudentProgress>();
+      .single();
 
+    const progress = progressRaw as StudentProgress | null;
     const lastOrderCompleted = progress?.last_order_completed ?? 0;
 
-    const { data: poolRows, error: poolError } = await supabase
+    const { data: poolRowsRaw, error: poolError } = await db
       .from("kanji_hints")
       .select(
         "kanji, meaning_ja, meaning_en, school_grade, jlpt_level, unit, order_in_unit, tags"
       )
       .eq("unit", account.current_unit)
       .eq("is_published", true)
-      .not("meaning_en", "is", null)
-      .returns<KanjiHintRow[]>();
+      .not("meaning_en", "is", null);
 
     if (poolError) {
       return NextResponse.json({ error: poolError.message }, { status: 400 });
     }
 
-    const pool = poolRows ?? [];
+    const pool = (poolRowsRaw ?? []) as KanjiHintRow[];
 
     if (mode === "review-wrong") {
-      const { data: attempts, error: attemptsError } = await supabase
+      const { data: attemptsRaw, error: attemptsError } = await db
         .from("kanji_attempts")
         .select("kanji, order_in_unit, is_correct, answered_at")
         .eq("student_account_id", account.id)
         .eq("unit", account.current_unit)
         .eq("quiz_type", "meaning_choice")
-        .order("answered_at", { ascending: false })
-        .returns<AttemptHistoryRow[]>();
+        .order("answered_at", { ascending: false });
 
       if (attemptsError) {
         return NextResponse.json(
@@ -357,7 +367,8 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const wrongKanjis = getLatestWrongKanji(attempts ?? []);
+      const attempts = (attemptsRaw ?? []) as AttemptHistoryRow[];
+      const wrongKanjis = getLatestWrongKanji(attempts);
 
       if (wrongKanjis.length === 0) {
         return NextResponse.json({
@@ -424,7 +435,7 @@ export async function GET(request: NextRequest) {
       .slice(0, QUESTION_LIMIT);
 
     if (orderedRows.length === 0) {
-      const { data: nextUnitRow, error: nextUnitError } = await supabase
+      const { data: nextUnitRowRaw, error: nextUnitError } = await db
         .from("kanji_hints")
         .select("unit")
         .eq("is_published", true)
@@ -440,31 +451,34 @@ export async function GET(request: NextRequest) {
         );
       }
 
+      const nextUnitRow = nextUnitRowRaw as { unit: string | null } | null;
+
       if (nextUnitRow?.unit) {
         activeUnit = nextUnitRow.unit;
 
-        await supabase
+        await db
           .from("student_accounts")
           .update({ current_unit: activeUnit })
           .eq("id", account.id);
 
-        await supabase.from("student_kanji_progress").upsert({
+        const nextProgressRow = {
           student_account_id: account.id,
           unit: activeUnit,
           last_order_completed: 0,
           last_studied_at: null,
           is_completed: false,
-        });
+        };
 
-        const { data: nextPoolRows, error: nextPoolError } = await supabase
+        await db.from("student_kanji_progress").upsert(nextProgressRow);
+
+        const { data: nextPoolRowsRaw, error: nextPoolError } = await db
           .from("kanji_hints")
           .select(
             "kanji, meaning_ja, meaning_en, school_grade, jlpt_level, unit, order_in_unit, tags"
           )
           .eq("unit", activeUnit)
           .eq("is_published", true)
-          .not("meaning_en", "is", null)
-          .returns<KanjiHintRow[]>();
+          .not("meaning_en", "is", null);
 
         if (nextPoolError) {
           return NextResponse.json(
@@ -473,7 +487,7 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        activePool = nextPoolRows ?? [];
+        activePool = (nextPoolRowsRaw ?? []) as KanjiHintRow[];
         activeLastOrderCompleted = 0;
 
         orderedRows = activePool
@@ -511,6 +525,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabase();
+    const db = supabase as any;
     const body = await request.json();
 
     const loginId = body.loginId as string;
@@ -519,11 +534,13 @@ export async function POST(request: NextRequest) {
     const mode = (body.mode as string) ?? "normal";
     const attempts = (body.attempts ?? []) as AttemptRow[];
 
-    const { data: account, error: accountError } = await supabase
+    const { data: accountRaw, error: accountError } = await db
       .from("student_accounts")
       .select("id, current_unit")
       .eq("student_login_id", loginId)
       .single();
+
+    const account = accountRaw as { id: string; current_unit: string | null } | null;
 
     if (accountError || !account) {
       return NextResponse.json(
@@ -545,9 +562,7 @@ export async function POST(request: NextRequest) {
         answered_at: new Date().toISOString(),
       }));
 
-      const { error: insertError } = await supabase
-        .from("kanji_attempts")
-        .insert(rows);
+      const { error: insertError } = await db.from("kanji_attempts").insert(rows);
 
       if (insertError) {
         return NextResponse.json(
@@ -558,28 +573,35 @@ export async function POST(request: NextRequest) {
     }
 
     if (mode === "normal") {
-      const { data: progress } = await supabase
+      const { data: progressRaw } = await db
         .from("student_kanji_progress")
         .select("last_order_completed")
         .eq("student_account_id", account.id)
         .eq("unit", unit)
         .single();
 
+      const progress = progressRaw as { last_order_completed?: number } | null;
+
       const newLastOrderCompleted =
         (progress?.last_order_completed ?? 0) + advanceCount;
 
-      const { error: upsertError } = await supabase
+      const progressRow = {
+        student_account_id: account.id,
+        unit,
+        last_order_completed: newLastOrderCompleted,
+        last_studied_at: new Date().toISOString(),
+        is_completed: false,
+      };
+
+      const { error: upsertError } = await db
         .from("student_kanji_progress")
-        .upsert({
-          student_account_id: account.id,
-          unit,
-          last_order_completed: newLastOrderCompleted,
-          last_studied_at: new Date().toISOString(),
-          is_completed: false,
-        });
+        .upsert(progressRow);
 
       if (upsertError) {
-        return NextResponse.json({ error: upsertError.message }, { status: 400 });
+        return NextResponse.json(
+          { error: upsertError.message },
+          { status: 400 }
+        );
       }
 
       await moveToNextUnitIfNeeded({
