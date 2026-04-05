@@ -30,6 +30,7 @@ type BatchResponse = {
 
 type AttemptRow = {
   kanji: string;
+  unit: string | null;
   order_in_unit: number;
   quiz_type: string;
   user_answer: string;
@@ -37,7 +38,17 @@ type AttemptRow = {
   is_correct: boolean;
 };
 
-type QuizMode = "normal" | "review-wrong" | "review-studied";
+type QuizMode =
+  | "normal"
+  | "review-wrong"
+  | "review-studied"
+  | "practice-set";
+
+type PracticeTarget = {
+  unit: string;
+  startOrder: number;
+  endOrder: number;
+};
 
 export default function KanjiQuizTestPage() {
   const [loading, setLoading] = useState(true);
@@ -60,6 +71,9 @@ export default function KanjiQuizTestPage() {
   const [showFinishMessage, setShowFinishMessage] = useState(false);
   const [lastSetCorrectCount, setLastSetCorrectCount] = useState(0);
   const [lastSetWrongCount, setLastSetWrongCount] = useState(0);
+  const [lastCompletedSet, setLastCompletedSet] = useState<PracticeTarget | null>(
+    null
+  );
 
   const [windowWidth, setWindowWidth] = useState(1200);
 
@@ -78,7 +92,26 @@ export default function KanjiQuizTestPage() {
   const isMobile = windowWidth <= 768;
   const isSmallMobile = windowWidth <= 430;
 
-  async function loadBatch(mode: QuizMode = "normal") {
+  function getPracticeTargetFromBatch(currentBatch: BatchResponse | null) {
+    if (!currentBatch || currentBatch.questions.length === 0) return null;
+
+    const orders = currentBatch.questions
+      .map((q) => q.order_in_unit)
+      .filter((n) => typeof n === "number");
+
+    if (orders.length === 0) return null;
+
+    return {
+      unit: currentBatch.questions[0]?.unit ?? currentBatch.unit,
+      startOrder: Math.min(...orders),
+      endOrder: Math.max(...orders),
+    };
+  }
+
+  async function loadBatch(
+    mode: QuizMode = "normal",
+    practiceTarget?: PracticeTarget | null
+  ) {
     setLoading(true);
     setError("");
     setSelected("");
@@ -92,7 +125,16 @@ export default function KanjiQuizTestPage() {
     setShowSetComplete(false);
     setShowFinishMessage(false);
 
-    const res = await fetch(`/api/kanji-quiz-test?mode=${mode}`, {
+    const params = new URLSearchParams();
+    params.set("mode", mode);
+
+    if (mode === "practice-set" && practiceTarget) {
+      params.set("unit", practiceTarget.unit);
+      params.set("startOrder", String(practiceTarget.startOrder));
+      params.set("endOrder", String(practiceTarget.endOrder));
+    }
+
+    const res = await fetch(`/api/kanji-quiz-test?${params.toString()}`, {
       method: "GET",
       credentials: "include",
     });
@@ -209,6 +251,12 @@ export default function KanjiQuizTestPage() {
 
     setLastSetCorrectCount(correctCount);
     setLastSetWrongCount(wrongCount);
+
+    const target = getPracticeTargetFromBatch(batch);
+    if (target) {
+      setLastCompletedSet(target);
+    }
+
     setShowSetComplete(true);
   }
 
@@ -226,6 +274,7 @@ export default function KanjiQuizTestPage() {
         ...prev,
         {
           kanji: currentQuestion.kanji,
+          unit: currentQuestion.unit,
           order_in_unit: currentQuestion.order_in_unit,
           quiz_type: "meaning_choice",
           user_answer: selected,
@@ -303,12 +352,18 @@ export default function KanjiQuizTestPage() {
     await loadBatch("normal");
   }
 
+  async function handlePracticeSetAgain() {
+    if (!lastCompletedSet) return;
+    setMenuOpen(false);
+    await loadBatch("practice-set", lastCompletedSet);
+  }
+
   function handleFinishForToday() {
     setShowSetComplete(false);
     setShowFinishMessage(true);
   }
 
-  function getOptionStyle(option: QuizOption, index: number): React.CSSProperties {
+  function getOptionStyle(option: QuizOption): React.CSSProperties {
     const selectedThis = selected === option.label;
     const showCorrect = checked && option.isCorrect;
     const showWrong = checked && selectedThis && !option.isCorrect;
@@ -346,11 +401,84 @@ export default function KanjiQuizTestPage() {
     return optionStyle;
   }
 
+  function renderActionButtons() {
+    return (
+      <div
+        style={{
+          ...styles.emptyButtons,
+          flexDirection: isMobile ? "column" : "row",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => loadBatch("normal")}
+          style={styles.emptyPrimaryButton}
+        >
+          Back to quiz
+        </button>
+
+        <button
+          type="button"
+          onClick={() => loadBatch("review-wrong")}
+          style={styles.emptySecondaryButton}
+        >
+          Review wrong answers
+        </button>
+
+        <button
+          type="button"
+          onClick={() => loadBatch("review-studied")}
+          style={styles.emptySecondaryButton}
+        >
+          Shuffle 10 studied kanji
+        </button>
+
+        {lastCompletedSet ? (
+          <button
+            type="button"
+            onClick={handlePracticeSetAgain}
+            style={styles.emptySecondaryButton}
+          >
+            Practice this set again
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  function getEmptyStateText() {
+    if (quizMode === "review-wrong") {
+      return {
+        title: "No wrong answers to review",
+        message: "You do not have any review questions right now.",
+      };
+    }
+
+    if (quizMode === "review-studied") {
+      return {
+        title: "No studied kanji found",
+        message: "Please answer a few quiz questions first, then try again.",
+      };
+    }
+
+    if (quizMode === "practice-set") {
+      return {
+        title: "This set is not available",
+        message: "Please go back to the quiz and finish a set first.",
+      };
+    }
+
+    return {
+      title: "No questions available",
+      message: "Please wait a moment, or go back to the quiz.",
+    };
+  }
+
   if (loading) {
     return (
       <main style={styles.page}>
         <div style={styles.centerWrap}>
-          <div style={styles.loadingCard}>Loading quiz...</div>
+          <div style={styles.loadingCard}>Please wait a moment...</div>
         </div>
       </main>
     );
@@ -360,7 +488,16 @@ export default function KanjiQuizTestPage() {
     return (
       <main style={styles.page}>
         <div style={styles.centerWrap}>
-          <div style={styles.errorCard}>{error}</div>
+          <div
+            style={{
+              ...styles.emptyCard,
+              width: isMobile ? "92%" : 720,
+            }}
+          >
+            <h2 style={styles.emptyTitle}>Something went wrong</h2>
+            <p style={styles.emptyText}>{error}</p>
+            {renderActionButtons()}
+          </div>
         </div>
       </main>
     );
@@ -435,7 +572,7 @@ export default function KanjiQuizTestPage() {
                 fontSize: isMobile ? 16 : 20,
               }}
             >
-              You finished 5 questions.
+              You finished {batch?.questions.length ?? 0} questions.
             </p>
             <p
               style={{
@@ -443,7 +580,7 @@ export default function KanjiQuizTestPage() {
                 fontSize: isMobile ? 15 : 18,
               }}
             >
-              Correct: {lastSetCorrectCount} / 5
+              Correct: {lastSetCorrectCount} / {batch?.questions.length ?? 0}
             </p>
             <p
               style={{
@@ -472,6 +609,7 @@ export default function KanjiQuizTestPage() {
               >
                 Do 5 more
               </button>
+
               <button
                 type="button"
                 onClick={handleFinishForToday}
@@ -484,6 +622,19 @@ export default function KanjiQuizTestPage() {
                 Finish for today
               </button>
             </div>
+
+            {lastCompletedSet ? (
+              <button
+                type="button"
+                onClick={handlePracticeSetAgain}
+                style={{
+                  ...styles.practiceSetButton,
+                  width: isMobile ? "100%" : undefined,
+                }}
+              >
+                Practice this set again
+              </button>
+            ) : null}
 
             {lastSetWrongCount > 0 ? (
               <button
@@ -504,10 +655,21 @@ export default function KanjiQuizTestPage() {
   }
 
   if (!batch || batch.questions.length === 0 || !currentQuestion) {
+    const emptyState = getEmptyStateText();
+
     return (
       <main style={styles.page}>
         <div style={styles.centerWrap}>
-          <div style={styles.loadingCard}>No questions available.</div>
+          <div
+            style={{
+              ...styles.emptyCard,
+              width: isMobile ? "92%" : 760,
+            }}
+          >
+            <h2 style={styles.emptyTitle}>{emptyState.title}</h2>
+            <p style={styles.emptyText}>{emptyState.message}</p>
+            {renderActionButtons()}
+          </div>
         </div>
       </main>
     );
@@ -589,6 +751,7 @@ export default function KanjiQuizTestPage() {
                     >
                       Review wrong answers
                     </button>
+
                     <button
                       type="button"
                       style={{
@@ -600,6 +763,21 @@ export default function KanjiQuizTestPage() {
                     >
                       Shuffle 10 studied kanji
                     </button>
+
+                    {lastCompletedSet ? (
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.menuItem,
+                          fontSize: isMobile ? 14 : 16,
+                          padding: isMobile ? "12px 14px" : "14px 16px",
+                        }}
+                        onClick={handlePracticeSetAgain}
+                      >
+                        Practice this set again
+                      </button>
+                    ) : null}
+
                     <button
                       type="button"
                       style={{
@@ -611,6 +789,7 @@ export default function KanjiQuizTestPage() {
                     >
                       Back to normal lesson
                     </button>
+
                     <button
                       type="button"
                       style={{
@@ -715,7 +894,7 @@ export default function KanjiQuizTestPage() {
                     if (checked) return;
                     setSelected(option.label);
                   }}
-                  style={getOptionStyle(option, index)}
+                  style={getOptionStyle(option)}
                 >
                   <span
                     style={{
@@ -849,16 +1028,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 28,
     fontWeight: 800,
     boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-  },
-  errorCard: {
-    background: "#fff0f0",
-    color: "#a40000",
-    padding: "24px 28px",
-    borderRadius: 24,
-    fontSize: 24,
-    fontWeight: 800,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-    maxWidth: 900,
+    textAlign: "center",
   },
   finishCard: {
     background: "#fff",
@@ -893,7 +1063,7 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
     textAlign: "center",
     minWidth: 340,
-    maxWidth: 540,
+    maxWidth: 560,
   },
   setCompleteTitle: {
     margin: 0,
@@ -936,6 +1106,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     cursor: "pointer",
   },
+  practiceSetButton: {
+    marginTop: 16,
+    border: "none",
+    borderRadius: 999,
+    background: "#3578e5",
+    color: "#fff",
+    padding: "12px 22px",
+    fontSize: 16,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
+  },
   reviewWrongButton: {
     marginTop: 16,
     border: "none",
@@ -947,6 +1129,53 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     cursor: "pointer",
     boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
+  },
+  emptyCard: {
+    background: "#fff",
+    borderRadius: 28,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+    textAlign: "center",
+    padding: "34px 26px",
+  },
+  emptyTitle: {
+    margin: 0,
+    fontSize: 32,
+    fontWeight: 900,
+    color: "#111",
+  },
+  emptyText: {
+    margin: "14px 0 0",
+    fontSize: 18,
+    lineHeight: 1.5,
+    fontWeight: 700,
+    color: "#444",
+  },
+  emptyButtons: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 12,
+    flexWrap: "wrap",
+    marginTop: 24,
+  },
+  emptyPrimaryButton: {
+    border: "none",
+    borderRadius: 999,
+    background: "#111",
+    color: "#fff",
+    padding: "12px 22px",
+    fontSize: 16,
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  emptySecondaryButton: {
+    border: "none",
+    borderRadius: 999,
+    background: "#ececec",
+    color: "#111",
+    padding: "12px 22px",
+    fontSize: 16,
+    fontWeight: 900,
+    cursor: "pointer",
   },
   topArea: {
     background: "#0f9b99",
@@ -1023,6 +1252,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gridTemplateRows: "auto auto auto auto",
     alignContent: "start",
+    width: "100%",
   },
   stickyShadow: {
     background: "#85d4c8",
@@ -1057,6 +1287,8 @@ const styles: Record<string, React.CSSProperties> = {
   optionsGrid: {
     display: "grid",
     alignItems: "stretch",
+    width: "min(1040px, 100%)",
+    margin: "0 auto",
   },
   optionButton: {
     border: "none",
@@ -1096,7 +1328,9 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   feedbackBox: {
-    maxWidth: 900,
+    width: "min(900px, 100%)",
+    marginLeft: "auto",
+    marginRight: "auto",
     background: "#fff",
     boxShadow: "0 8px 20px rgba(0,0,0,0.06)",
   },

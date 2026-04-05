@@ -34,6 +34,7 @@ type KanjiHintRow = {
 
 type AttemptRow = {
   kanji: string;
+  unit: string | null;
   order_in_unit: number;
   quiz_type: string;
   user_answer: string;
@@ -43,6 +44,7 @@ type AttemptRow = {
 
 type AttemptHistoryRow = {
   kanji: string;
+  unit: string | null;
   order_in_unit: number | null;
   is_correct: boolean;
   answered_at: string;
@@ -93,6 +95,24 @@ function hasSharedTags(a: string[], b: string[]): boolean {
   if (a.length === 0 || b.length === 0) return false;
   const setA = new Set(a);
   return b.some((tag) => setA.has(tag));
+}
+
+function uniquePreserveOrder<T>(items: T[]) {
+  return Array.from(new Set(items));
+}
+
+function sortRowsByKanjiOrder(rows: KanjiHintRow[], kanjis: string[]) {
+  const rowMap = new Map<string, KanjiHintRow>();
+
+  for (const row of rows) {
+    if (!rowMap.has(row.kanji)) {
+      rowMap.set(row.kanji, row);
+    }
+  }
+
+  return kanjis
+    .map((kanji) => rowMap.get(kanji))
+    .filter((row): row is KanjiHintRow => Boolean(row));
 }
 
 function makeQuizItems(sourceRows: KanjiHintRow[], pool: KanjiHintRow[]) {
@@ -177,6 +197,45 @@ function makeQuizItems(sourceRows: KanjiHintRow[], pool: KanjiHintRow[]) {
         options,
       };
     });
+}
+
+async function fetchKanjiPool(db: any, unit?: string) {
+  let query = db
+    .from("kanji_hints")
+    .select(
+      "kanji, meaning_ja, meaning_en, school_grade, jlpt_level, unit, order_in_unit, tags"
+    )
+    .eq("is_published", true)
+    .not("meaning_en", "is", null);
+
+  if (unit) {
+    query = query.eq("unit", unit);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as KanjiHintRow[];
+}
+
+async function getCurrentProgress(db: any, accountId: string, unit: string) {
+  const { data, error } = await db
+    .from("student_kanji_progress")
+    .select(
+      "student_account_id, unit, last_order_completed, last_studied_at, is_completed"
+    )
+    .eq("student_account_id", accountId)
+    .eq("unit", unit)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? null) as StudentProgress | null;
 }
 
 async function moveToNextUnitIfNeeded(params: {
@@ -347,46 +406,13 @@ export async function GET(request: NextRequest) {
       return errorResponse!;
     }
 
-    if (!account.current_unit) {
-      return NextResponse.json(
-        { error: "current_unit is empty." },
-        { status: 400 }
-      );
-    }
+    if (mode === "review-wrong" || mode === "review-studied") {
+      const globalPool = await fetchKanjiPool(db);
 
-    const { data: progressRaw } = await db
-      .from("student_kanji_progress")
-      .select(
-        "student_account_id, unit, last_order_completed, last_studied_at, is_completed"
-      )
-      .eq("student_account_id", account.id)
-      .eq("unit", account.current_unit)
-      .single();
-
-    const progress = progressRaw as StudentProgress | null;
-    const lastOrderCompleted = progress?.last_order_completed ?? 0;
-
-    const { data: poolRowsRaw, error: poolError } = await db
-      .from("kanji_hints")
-      .select(
-        "kanji, meaning_ja, meaning_en, school_grade, jlpt_level, unit, order_in_unit, tags"
-      )
-      .eq("unit", account.current_unit)
-      .eq("is_published", true)
-      .not("meaning_en", "is", null);
-
-    if (poolError) {
-      return NextResponse.json({ error: poolError.message }, { status: 400 });
-    }
-
-    const pool = (poolRowsRaw ?? []) as KanjiHintRow[];
-
-    if (mode === "review-wrong") {
       const { data: attemptsRaw, error: attemptsError } = await db
         .from("kanji_attempts")
-        .select("kanji, order_in_unit, is_correct, answered_at")
+        .select("kanji, unit, order_in_unit, is_correct, answered_at")
         .eq("student_account_id", account.id)
-        .eq("unit", account.current_unit)
         .eq("quiz_type", "meaning_choice")
         .order("answered_at", { ascending: false });
 
@@ -398,62 +424,110 @@ export async function GET(request: NextRequest) {
       }
 
       const attempts = (attemptsRaw ?? []) as AttemptHistoryRow[];
-      const wrongKanjis = getLatestWrongKanji(attempts);
 
-      if (wrongKanjis.length === 0) {
+      const targetKanjis =
+        mode === "review-wrong"
+          ? getLatestWrongKanji(attempts).slice(0, REVIEW_LIMIT)
+          : uniquePreserveOrder(attempts.map((row) => row.kanji)).slice(
+              0,
+              REVIEW_LIMIT
+            );
+
+      if (targetKanjis.length === 0) {
+        const progress = account.current_unit
+          ? await getCurrentProgress(db, account.id, account.current_unit)
+          : null;
+
         return NextResponse.json({
           account: {
             display_name: account.display_name,
             student_login_id: account.student_login_id,
           },
-          unit: account.current_unit,
-          lastOrderCompleted,
+          unit: account.current_unit ?? "",
+          lastOrderCompleted: progress?.last_order_completed ?? 0,
           mode,
           finished: true,
           questions: [],
         });
       }
 
-      const wrongRows = pool.filter((row) => wrongKanjis.includes(row.kanji));
-      const sourceRows = shuffleArray(wrongRows).slice(0, REVIEW_LIMIT);
+      const sourceRows = sortRowsByKanjiOrder(globalPool, targetKanjis).slice(
+        0,
+        REVIEW_LIMIT
+      );
+
+      const progress = account.current_unit
+        ? await getCurrentProgress(db, account.id, account.current_unit)
+        : null;
 
       return NextResponse.json({
         account: {
           display_name: account.display_name,
           student_login_id: account.student_login_id,
         },
-        unit: account.current_unit,
-        lastOrderCompleted,
+        unit: account.current_unit ?? sourceRows[0]?.unit ?? "",
+        lastOrderCompleted: progress?.last_order_completed ?? 0,
         mode,
         finished: sourceRows.length === 0,
-        questions: makeQuizItems(sourceRows, pool),
+        questions: makeQuizItems(sourceRows, globalPool),
       });
     }
 
-    if (mode === "review-studied") {
-      const studiedRows = pool.filter((row) => {
-        if (row.order_in_unit === null) return false;
-        return row.order_in_unit <= lastOrderCompleted;
-      });
+    if (mode === "practice-set") {
+      const unit = request.nextUrl.searchParams.get("unit");
+      const startOrder = Number(
+        request.nextUrl.searchParams.get("startOrder") ?? 0
+      );
+      const endOrder = Number(request.nextUrl.searchParams.get("endOrder") ?? 0);
 
-      const sourceRows = shuffleArray(studiedRows).slice(0, REVIEW_LIMIT);
+      if (!unit || !startOrder || !endOrder) {
+        return NextResponse.json(
+          { error: "unit, startOrder, and endOrder are required." },
+          { status: 400 }
+        );
+      }
+
+      const unitPool = await fetchKanjiPool(db, unit);
+
+      const sourceRows = shuffleArray(
+        unitPool
+          .filter(
+            (row) =>
+              row.order_in_unit !== null &&
+              row.order_in_unit >= startOrder &&
+              row.order_in_unit <= endOrder
+          )
+          .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
+      );
+
+      const progress = account.current_unit
+        ? await getCurrentProgress(db, account.id, account.current_unit)
+        : null;
 
       return NextResponse.json({
         account: {
           display_name: account.display_name,
           student_login_id: account.student_login_id,
         },
-        unit: account.current_unit,
-        lastOrderCompleted,
+        unit,
+        lastOrderCompleted: progress?.last_order_completed ?? 0,
         mode,
         finished: sourceRows.length === 0,
-        questions: makeQuizItems(sourceRows, pool),
+        questions: makeQuizItems(sourceRows, unitPool),
       });
+    }
+
+    if (!account.current_unit) {
+      return NextResponse.json(
+        { error: "current_unit is empty." },
+        { status: 400 }
+      );
     }
 
     let activeUnit = account.current_unit;
-    let activePool = pool;
-    let activeLastOrderCompleted = lastOrderCompleted;
+    let activePool = await fetchKanjiPool(db, activeUnit);
+    let progress = await getCurrentProgress(db, account.id, activeUnit);
+    let activeLastOrderCompleted = progress?.last_order_completed ?? 0;
 
     let orderedRows = activePool
       .filter(
@@ -517,25 +591,8 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        const { data: nextPoolRowsRaw, error: nextPoolError } = await db
-          .from("kanji_hints")
-          .select(
-            "kanji, meaning_ja, meaning_en, school_grade, jlpt_level, unit, order_in_unit, tags"
-          )
-          .eq("unit", activeUnit)
-          .eq("is_published", true)
-          .not("meaning_en", "is", null);
-
-        if (nextPoolError) {
-          return NextResponse.json(
-            { error: nextPoolError.message },
-            { status: 400 }
-          );
-        }
-
-        activePool = (nextPoolRowsRaw ?? []) as KanjiHintRow[];
+        activePool = await fetchKanjiPool(db, activeUnit);
         activeLastOrderCompleted = 0;
-
         orderedRows = activePool
           .filter(
             (row) =>
@@ -574,8 +631,9 @@ export async function POST(request: NextRequest) {
     const db = supabase as any;
     const body = await request.json();
 
-    const unit = body.unit as string;
-    const advanceCount = body.advanceCount as number;
+    const unit = typeof body.unit === "string" ? body.unit : "";
+    const advanceCount =
+      typeof body.advanceCount === "number" ? body.advanceCount : 0;
     const mode = (body.mode as string) ?? "normal";
     const attempts = (body.attempts ?? []) as AttemptRow[];
 
@@ -584,21 +642,19 @@ export async function POST(request: NextRequest) {
       return errorResponse!;
     }
 
-    if (!unit) {
-      return NextResponse.json({ error: "unit is required." }, { status: 400 });
-    }
-
     if (attempts.length > 0) {
+      const now = new Date().toISOString();
+
       const rows = attempts.map((item) => ({
         student_account_id: account.id,
         kanji: item.kanji,
-        unit,
+        unit: item.unit ?? unit,
         order_in_unit: item.order_in_unit,
         quiz_type: item.quiz_type,
         user_answer: item.user_answer,
         correct_answer: item.correct_answer,
         is_correct: item.is_correct,
-        answered_at: new Date().toISOString(),
+        answered_at: now,
       }));
 
       const { error: insertError } = await db.from("kanji_attempts").insert(rows);
@@ -612,14 +668,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (mode === "normal") {
-      const { data: progressRaw } = await db
-        .from("student_kanji_progress")
-        .select("last_order_completed")
-        .eq("student_account_id", account.id)
-        .eq("unit", unit)
-        .single();
+      if (!unit) {
+        return NextResponse.json(
+          { error: "unit is required." },
+          { status: 400 }
+        );
+      }
 
-      const progress = progressRaw as { last_order_completed?: number } | null;
+      const progress = await getCurrentProgress(db, account.id, unit);
 
       const newLastOrderCompleted =
         (progress?.last_order_completed ?? 0) + advanceCount;

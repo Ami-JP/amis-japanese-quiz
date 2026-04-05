@@ -4,7 +4,9 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 export async function POST(req: Request) {
   try {
-    const { loginId, pin } = await req.json()
+    const { loginId: rawLoginId, pin: rawPin } = await req.json()
+    const loginId = String(rawLoginId ?? '').trim()
+    const pin = String(rawPin ?? '').trim()
     const db = supabaseAdmin as any
 
     if (!loginId || !pin) {
@@ -14,10 +16,13 @@ export async function POST(req: Request) {
       )
     }
 
-    const { data: studentId, error: verifyError } = await db.rpc('verify_student_login', {
-      p_login_id: loginId,
-      p_pin: pin,
-    })
+    const { data: studentId, error: verifyError } = await db.rpc(
+      'verify_student_login',
+      {
+        p_login_id: loginId,
+        p_pin: pin,
+      }
+    )
 
     if (verifyError) {
       return NextResponse.json(
@@ -56,7 +61,7 @@ export async function POST(req: Request) {
 
     res.cookies.set('student_session', rawToken, {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
       expires: expiresAt,
