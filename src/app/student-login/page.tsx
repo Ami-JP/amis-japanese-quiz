@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-function UserIcon() {
+function UserIcon({ size }: { size: number }) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-8 w-8 md:h-10 md:w-10">
+    <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: size, height: size }}>
       <path
         d="M12 12c2.9 0 5-2.3 5-5.1S14.9 1.8 12 1.8 7 4.1 7 6.9 9.1 12 12 12Zm0 2.2c-4.3 0-7.8 2.3-9.3 5.7-.3.7.2 1.5 1 1.5h16.6c.8 0 1.3-.8 1-1.5-1.5-3.4-5-5.7-9.3-5.7Z"
         fill="white"
@@ -14,9 +14,9 @@ function UserIcon() {
   )
 }
 
-function LockIcon() {
+function LockIcon({ size }: { size: number }) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-8 w-8 md:h-10 md:w-10">
+    <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: size, height: size }}>
       <path
         d="M17 10V7.8C17 4.6 14.5 2 11.4 2S5.8 4.6 5.8 7.8V10H5c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8c0-1.1-.9-2-2-2H17Zm-8.7 0V7.8c0-1.8 1.4-3.3 3.1-3.3s3.1 1.5 3.1 3.3V10H8.3Zm3.1 7.3c-.8 0-1.5-.7-1.5-1.5 0-.6.3-1.1.9-1.4v-1c0-.6.5-1.1 1.1-1.1s1.1.5 1.1 1.1v1c.5.3.9.8.9 1.4 0 .8-.7 1.5-1.5 1.5Z"
         fill="white"
@@ -31,6 +31,22 @@ export default function StudentLoginPage() {
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [windowWidth, setWindowWidth] = useState(1200)
+
+  useEffect(() => {
+    function handleResize() {
+      setWindowWidth(window.innerWidth)
+    }
+
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const isMobile = windowWidth <= 768
+  const isSmallMobile = windowWidth <= 430
+
+  const iconSize = isMobile ? (isSmallMobile ? 28 : 32) : 44
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -64,87 +80,330 @@ export default function StudentLoginPage() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#f5b400] px-4 py-5 md:px-6 md:py-8">
-      <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] max-w-[1150px] items-center justify-center">
-        <div className="relative w-full overflow-hidden rounded-[44px] bg-[#e9e9e9] px-5 py-8 shadow-[0_18px_40px_rgba(0,0,0,0.12)] md:rounded-[999px] md:px-16 md:py-14">
-          <div className="mx-auto flex max-w-[860px] flex-col items-center">
-            <div className="rounded-full bg-[#4c97cc] px-5 py-3 text-center text-sm font-medium tracking-[0.02em] text-white md:px-10 md:py-5 md:text-[18px]">
+    <main
+      style={{
+        minHeight: '100dvh',
+        background: '#f2b400',
+        padding: isMobile ? '10px' : '20px',
+        color: '#111',
+        fontFamily:
+          'Arial, Helvetica, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        boxSizing: 'border-box',
+      }}
+    >
+      <div
+        style={{
+          minHeight: isMobile ? 'calc(100dvh - 20px)' : 'calc(100dvh - 40px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: '100%',
+            maxWidth: isMobile ? 560 : 1400,
+            minHeight: isMobile ? 'auto' : 'min(900px, calc(100dvh - 40px))',
+            background: '#e8e8e8',
+            borderRadius: isMobile ? 34 : 999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxSizing: 'border-box',
+            padding: isMobile
+              ? isSmallMobile
+                ? '20px 14px 24px'
+                : '24px 18px 28px'
+              : '28px 40px',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: isMobile ? 520 : 980,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                background: '#4a97cc',
+                color: '#fff',
+                borderRadius: 999,
+                padding: isMobile
+                  ? isSmallMobile
+                    ? '10px 14px'
+                    : '12px 18px'
+                  : '20px 36px',
+                fontSize: isMobile ? (isSmallMobile ? 14 : 16) : 28,
+                textAlign: 'center',
+                lineHeight: 1.25,
+                maxWidth: isMobile ? '100%' : 860,
+                width: isMobile ? '100%' : 'auto',
+                boxSizing: 'border-box',
+              }}
+            >
               A little practice every day makes a big difference
             </div>
 
-            <div className="mt-7 w-full text-left md:mt-9">
-              <p className="text-[28px] font-black leading-none text-black md:text-[42px]">
+            <div
+              style={{
+                width: '100%',
+                marginTop: isMobile ? 22 : 38,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: isMobile ? (isSmallMobile ? 22 : 26) : 42,
+                  fontWeight: 900,
+                  lineHeight: 1.1,
+                  color: '#111',
+                }}
+              >
                 LET&apos;S START ♪
-              </p>
-              <h1 className="mt-2 text-[54px] font-black leading-[0.95] tracking-[-0.04em] text-black md:text-[110px]">
+              </div>
+
+              <h1
+                style={{
+                  margin: isMobile ? '8px 0 0' : '10px 0 0',
+                  fontSize: isMobile ? (isSmallMobile ? 46 : 58) : 108,
+                  fontWeight: 900,
+                  letterSpacing: '-0.05em',
+                  lineHeight: 0.95,
+                  color: '#111',
+                  wordBreak: 'break-word',
+                }}
+              >
                 KANJI QUIZ
               </h1>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-6 w-full max-w-[620px] md:mt-8">
-              <div className="relative rounded-[30px] bg-[#f5b400] px-4 pb-7 pt-6 shadow-[0_14px_0_#d49a00] md:rounded-[38px] md:px-7 md:pb-9 md:pt-8">
-                <div className="absolute -left-1 top-1 hidden md:block">
-                  <div className="flex flex-col gap-2">
-                    <span className="block h-3 w-10 rotate-[42deg] rounded-full bg-[#f5b400]" />
-                    <span className="block h-3 w-12 rounded-full bg-[#f5b400]" />
-                    <span className="block h-3 w-8 -rotate-[42deg] rounded-full bg-[#f5b400]" />
+            <form
+              onSubmit={handleSubmit}
+              style={{
+                width: '100%',
+                maxWidth: isMobile ? '100%' : 720,
+                marginTop: isMobile ? 24 : 34,
+              }}
+            >
+              <div style={{ position: 'relative' }}>
+                {!isMobile ? (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: -54,
+                      top: -14,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 12,
+                    }}
+                    aria-hidden="true"
+                  >
+                    <span
+                      style={{
+                        display: 'block',
+                        height: 10,
+                        width: 42,
+                        borderRadius: 999,
+                        background: '#f2b400',
+                        transform: 'rotate(45deg)',
+                      }}
+                    />
+                    <span
+                      style={{
+                        display: 'block',
+                        height: 10,
+                        width: 48,
+                        borderRadius: 999,
+                        background: '#f2b400',
+                      }}
+                    />
+                    <span
+                      style={{
+                        display: 'block',
+                        height: 10,
+                        width: 36,
+                        borderRadius: 999,
+                        background: '#f2b400',
+                        transform: 'rotate(-45deg)',
+                      }}
+                    />
                   </div>
-                </div>
+                ) : null}
 
                 <div
-                  className="absolute bottom-[-34px] right-[42px] h-0 w-0
-                  border-l-[36px] border-r-[0px] border-t-[34px]
-                  border-l-transparent border-r-transparent border-t-[#d49a00] md:bottom-[-48px] md:right-[76px]
-                  md:border-l-[56px] md:border-t-[48px]"
-                />
-                <div
-                  className="absolute bottom-[-24px] right-[54px] h-0 w-0
-                  border-l-[26px] border-r-[0px] border-t-[24px]
-                  border-l-transparent border-r-transparent border-t-[#f5b400] md:bottom-[-34px] md:right-[88px]
-                  md:border-l-[40px] md:border-t-[34px]"
-                />
-
-                <div className="space-y-4 md:space-y-5">
-                  <label className="flex items-center gap-3 md:gap-5">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-transparent md:h-16 md:w-16">
-                      <UserIcon />
+                  style={{
+                    position: 'relative',
+                    background: '#f2b400',
+                    borderRadius: isMobile ? 26 : 40,
+                    padding: isMobile
+                      ? isSmallMobile
+                        ? '18px 12px 24px'
+                        : '22px 16px 28px'
+                      : '34px 38px 42px',
+                    boxShadow: isMobile ? '0 10px 0 #d49f00' : '0 18px 0 #d49f00',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: isMobile ? 10 : 18,
+                      marginBottom: isMobile ? 12 : 20,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: isMobile ? 42 : 70,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <UserIcon size={iconSize} />
                     </div>
+
                     <input
                       value={loginId}
                       onChange={(e) => setLoginId(e.target.value)}
                       autoComplete="username"
                       placeholder="Username"
-                      className="h-14 w-full rounded-full border-0 bg-[#f3f3f3] px-6 text-[20px] text-[#424242] placeholder:text-[#585858] focus:outline-none md:h-20 md:px-10 md:text-[34px]"
+                      style={{
+                        width: '100%',
+                        height: isMobile ? (isSmallMobile ? 52 : 58) : 86,
+                        borderRadius: 999,
+                        border: 'none',
+                        outline: 'none',
+                        background: '#f3f3f3',
+                        color: '#444',
+                        padding: isMobile
+                          ? isSmallMobile
+                            ? '0 18px'
+                            : '0 20px'
+                          : '0 34px',
+                        fontSize: isMobile ? (isSmallMobile ? 18 : 22) : 34,
+                        boxSizing: 'border-box',
+                      }}
                     />
-                  </label>
+                  </div>
 
-                  <label className="flex items-center gap-3 md:gap-5">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-transparent md:h-16 md:w-16">
-                      <LockIcon />
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: isMobile ? 10 : 18,
+                      marginBottom: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: isMobile ? 42 : 70,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <LockIcon size={iconSize} />
                     </div>
+
                     <input
                       type="password"
                       value={pin}
                       onChange={(e) => setPin(e.target.value)}
                       autoComplete="current-password"
                       placeholder="********"
-                      className="h-14 w-full rounded-full border-0 bg-[#f3f3f3] px-6 text-[20px] text-[#424242] placeholder:text-[#585858] focus:outline-none md:h-20 md:px-10 md:text-[34px]"
+                      style={{
+                        width: '100%',
+                        height: isMobile ? (isSmallMobile ? 52 : 58) : 86,
+                        borderRadius: 999,
+                        border: 'none',
+                        outline: 'none',
+                        background: '#f3f3f3',
+                        color: '#444',
+                        padding: isMobile
+                          ? isSmallMobile
+                            ? '0 18px'
+                            : '0 20px'
+                          : '0 34px',
+                        fontSize: isMobile ? (isSmallMobile ? 18 : 22) : 34,
+                        boxSizing: 'border-box',
+                      }}
                     />
-                  </label>
-                </div>
+                  </div>
 
-                {error ? (
-                  <p className="mt-4 rounded-2xl bg-white/75 px-4 py-3 text-center text-sm font-semibold text-red-700 md:text-base">
-                    {error}
-                  </p>
-                ) : null}
+                  {error ? (
+                    <p
+                      style={{
+                        margin: '14px 0 0',
+                        padding: isMobile ? '10px 12px' : '12px 16px',
+                        borderRadius: 18,
+                        background: 'rgba(255,255,255,0.82)',
+                        color: '#b42318',
+                        fontSize: isMobile ? 14 : 18,
+                        fontWeight: 700,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {error}
+                    </p>
+                  ) : null}
+
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: isMobile ? 34 : 84,
+                      bottom: isMobile ? -30 : -58,
+                      width: 0,
+                      height: 0,
+                      borderLeft: isMobile ? '42px solid transparent' : '86px solid transparent',
+                      borderTop: isMobile ? '32px solid #d49f00' : '64px solid #d49f00',
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: isMobile ? 42 : 98,
+                      bottom: isMobile ? -20 : -40,
+                      width: 0,
+                      height: 0,
+                      borderLeft: isMobile ? '30px solid transparent' : '62px solid transparent',
+                      borderTop: isMobile ? '22px solid #f2b400' : '44px solid #f2b400',
+                    }}
+                  />
+                </div>
               </div>
 
-              <div className="mt-12 flex justify-center md:mt-16">
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  marginTop: isMobile ? 42 : 72,
+                }}
+              >
                 <button
                   type="submit"
                   disabled={loading}
-                  className="rounded-full bg-[#e63333] px-9 py-3 text-[24px] font-black tracking-[0.06em] text-white shadow-[0_9px_0_#111] transition hover:translate-y-[1px] hover:shadow-[0_7px_0_#111] disabled:cursor-not-allowed disabled:opacity-60 md:px-14 md:py-4 md:text-[34px]"
+                  style={{
+                    border: 'none',
+                    borderRadius: 999,
+                    background: '#e53935',
+                    color: '#fff',
+                    fontWeight: 900,
+                    fontSize: isMobile ? (isSmallMobile ? 22 : 26) : 34,
+                    letterSpacing: '0.06em',
+                    padding: isMobile
+                      ? isSmallMobile
+                        ? '14px 28px'
+                        : '16px 34px'
+                      : '20px 54px',
+                    cursor: 'pointer',
+                    boxShadow: isMobile ? '0 7px 0 #111' : '0 10px 0 #111',
+                    opacity: loading ? 0.7 : 1,
+                  }}
                 >
                   {loading ? 'LOGGING IN...' : 'LOG IN'}
                 </button>
