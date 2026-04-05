@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const TEST_LOGIN_ID = "test_ami_001";
-
 type QuizOption = {
   label: string;
   isCorrect: boolean;
@@ -26,6 +24,7 @@ type BatchResponse = {
   unit: string;
   lastOrderCompleted: number;
   mode?: string;
+  finished?: boolean;
   questions: QuizQuestion[];
 };
 
@@ -43,6 +42,7 @@ type QuizMode = "normal" | "review-wrong" | "review-studied";
 export default function KanjiQuizTestPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState("");
   const [batch, setBatch] = useState<BatchResponse | null>(null);
 
@@ -92,7 +92,16 @@ export default function KanjiQuizTestPage() {
     setShowSetComplete(false);
     setShowFinishMessage(false);
 
-    const res = await fetch(`/api/kanji-quiz-test?mode=${mode}`);
+    const res = await fetch(`/api/kanji-quiz-test?mode=${mode}`, {
+      method: "GET",
+      credentials: "include",
+    });
+
+    if (res.status === 401) {
+      window.location.href = "/student-login";
+      return;
+    }
+
     const data = await res.json();
 
     if (!res.ok) {
@@ -145,14 +154,20 @@ export default function KanjiQuizTestPage() {
       headers: {
         "Content-Type": "application/json",
       },
+      credentials: "include",
       body: JSON.stringify({
-        loginId: TEST_LOGIN_ID,
         unit: batch.unit,
         advanceCount: batch.questions.length,
         attempts,
         mode: quizMode,
       }),
     });
+
+    if (res.status === 401) {
+      setSaving(false);
+      window.location.href = "/student-login";
+      return false;
+    }
 
     const data = await res.json();
 
@@ -164,6 +179,22 @@ export default function KanjiQuizTestPage() {
 
     setSaving(false);
     return true;
+  }
+
+  async function handleLogout() {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+    setMenuOpen(false);
+
+    try {
+      await fetch("/api/student-logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } finally {
+      window.location.href = "/student-login";
+    }
   }
 
   function resetQuestionState() {
@@ -580,6 +611,19 @@ export default function KanjiQuizTestPage() {
                     >
                       Back to normal lesson
                     </button>
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.menuItem,
+                        fontSize: isMobile ? 14 : 16,
+                        padding: isMobile ? "12px 14px" : "14px 16px",
+                        borderBottom: "none",
+                        color: "#b42318",
+                      }}
+                      onClick={handleLogout}
+                    >
+                      {loggingOut ? "Logging out..." : "Logout"}
+                    </button>
                   </div>
                 ) : null}
               </div>
@@ -607,11 +651,7 @@ export default function KanjiQuizTestPage() {
             <h1
               style={{
                 ...styles.title,
-                fontSize: isMobile
-                  ? isSmallMobile
-                    ? 16
-                    : 18
-                  : 34,
+                fontSize: isMobile ? (isSmallMobile ? 16 : 18) : 34,
                 lineHeight: isMobile ? 1.15 : 1.08,
                 maxWidth: 900,
                 marginLeft: "auto",
@@ -653,11 +693,7 @@ export default function KanjiQuizTestPage() {
               <div
                 style={{
                   ...styles.kanji,
-                  fontSize: isMobile
-                    ? isSmallMobile
-                      ? 64
-                      : 72
-                    : 150,
+                  fontSize: isMobile ? (isSmallMobile ? 64 : 72) : 150,
                 }}
               >
                 {currentQuestion.kanji}

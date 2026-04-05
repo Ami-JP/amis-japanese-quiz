@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getStudentSession } from "@/lib/auth/student";
 
-const TEST_LOGIN_ID = "test_ami_001";
 const QUESTION_LIMIT = 5;
 const REVIEW_LIMIT = 10;
 
@@ -289,32 +289,62 @@ function getLatestWrongKanji(attempts: AttemptHistoryRow[]) {
     .map((row) => row.kanji);
 }
 
+async function getLoggedInAccount(db: any) {
+  const session = await getStudentSession();
+
+  if (!session?.studentAccountId) {
+    return {
+      account: null,
+      errorResponse: NextResponse.json(
+        { error: "Unauthorized. Please log in again." },
+        { status: 401 }
+      ),
+    };
+  }
+
+  const { data: accountRaw, error: accountError } = await db
+    .from("student_accounts")
+    .select("id, student_login_id, display_name, is_active, current_unit")
+    .eq("id", session.studentAccountId)
+    .single();
+
+  const account = accountRaw as StudentAccount | null;
+
+  if (accountError || !account) {
+    return {
+      account: null,
+      errorResponse: NextResponse.json(
+        { error: accountError?.message ?? "Account not found." },
+        { status: 400 }
+      ),
+    };
+  }
+
+  if (!account.is_active) {
+    return {
+      account: null,
+      errorResponse: NextResponse.json(
+        { error: "This account is inactive." },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return {
+    account,
+    errorResponse: null,
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
     const db = supabase as any;
     const mode = request.nextUrl.searchParams.get("mode") ?? "normal";
 
-    const { data: accountRaw, error: accountError } = await db
-      .from("student_accounts")
-      .select("id, student_login_id, display_name, is_active, current_unit")
-      .eq("student_login_id", TEST_LOGIN_ID)
-      .single();
-
-    const account = accountRaw as StudentAccount | null;
-
-    if (accountError || !account) {
-      return NextResponse.json(
-        { error: accountError?.message ?? "Test account not found." },
-        { status: 400 }
-      );
-    }
-
-    if (!account.is_active) {
-      return NextResponse.json(
-        { error: "This account is inactive." },
-        { status: 403 }
-      );
+    const { account, errorResponse } = await getLoggedInAccount(db);
+    if (!account) {
+      return errorResponse!;
     }
 
     if (!account.current_unit) {
@@ -456,10 +486,17 @@ export async function GET(request: NextRequest) {
       if (nextUnitRow?.unit) {
         activeUnit = nextUnitRow.unit;
 
-        await db
+        const { error: updateCurrentUnitError } = await db
           .from("student_accounts")
           .update({ current_unit: activeUnit })
           .eq("id", account.id);
+
+        if (updateCurrentUnitError) {
+          return NextResponse.json(
+            { error: updateCurrentUnitError.message },
+            { status: 400 }
+          );
+        }
 
         const nextProgressRow = {
           student_account_id: account.id,
@@ -469,7 +506,16 @@ export async function GET(request: NextRequest) {
           is_completed: false,
         };
 
-        await db.from("student_kanji_progress").upsert(nextProgressRow);
+        const { error: upsertNextProgressError } = await db
+          .from("student_kanji_progress")
+          .upsert(nextProgressRow);
+
+        if (upsertNextProgressError) {
+          return NextResponse.json(
+            { error: upsertNextProgressError.message },
+            { status: 400 }
+          );
+        }
 
         const { data: nextPoolRowsRaw, error: nextPoolError } = await db
           .from("kanji_hints")
@@ -528,25 +574,18 @@ export async function POST(request: NextRequest) {
     const db = supabase as any;
     const body = await request.json();
 
-    const loginId = body.loginId as string;
     const unit = body.unit as string;
     const advanceCount = body.advanceCount as number;
     const mode = (body.mode as string) ?? "normal";
     const attempts = (body.attempts ?? []) as AttemptRow[];
 
-    const { data: accountRaw, error: accountError } = await db
-      .from("student_accounts")
-      .select("id, current_unit")
-      .eq("student_login_id", loginId)
-      .single();
+    const { account, errorResponse } = await getLoggedInAccount(db);
+    if (!account) {
+      return errorResponse!;
+    }
 
-    const account = accountRaw as { id: string; current_unit: string | null } | null;
-
-    if (accountError || !account) {
-      return NextResponse.json(
-        { error: accountError?.message ?? "Account not found." },
-        { status: 400 }
-      );
+    if (!unit) {
+      return NextResponse.json({ error: "unit is required." }, { status: 400 });
     }
 
     if (attempts.length > 0) {
