@@ -26,6 +26,13 @@ type AttemptRow = {
   answered_at: string | null
 }
 
+type UnitProgressRow = {
+  unit: string
+  last_order_completed: number | null
+  is_completed: boolean | null
+  last_studied_at: string | null
+}
+
 function formatDate(value: string | null) {
   if (!value) return '-'
   const date = new Date(value)
@@ -76,6 +83,12 @@ export default async function TeacherStudentDetailPage({
     .order('answered_at', { ascending: false })
     .limit(20)
 
+  const { data: unitProgressRows, error: unitProgressError } = await db
+    .from('student_kanji_progress')
+    .select('unit, last_order_completed, is_completed, last_studied_at')
+    .eq('student_account_id', id)
+    .order('unit', { ascending: true })
+
   if (wrongError) {
     return (
       <main className="min-h-screen bg-slate-50 p-6">
@@ -100,9 +113,22 @@ export default async function TeacherStudentDetailPage({
     )
   }
 
+  if (unitProgressError) {
+    return (
+      <main className="min-h-screen bg-slate-50 p-6">
+        <div className="mx-auto max-w-5xl rounded-2xl bg-white p-6 shadow">
+          <p className="text-red-600">
+            Failed to load unit progress: {unitProgressError.message}
+          </p>
+        </div>
+      </main>
+    )
+  }
+
   const studentData: StudentProgressRow = student
   const wrongList: WrongKanjiRow[] = wrongRows ?? []
   const attemptList: AttemptRow[] = attempts ?? []
+  const unitProgressList: UnitProgressRow[] = unitProgressRows ?? []
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6">
@@ -120,7 +146,7 @@ export default async function TeacherStudentDetailPage({
           <h1 className="text-2xl font-bold sm:text-3xl">
             {studentData.display_name || 'No name'}
           </h1>
-          <p className="mt-2 text-sm sm:text-base text-teal-50">
+          <p className="mt-2 text-sm text-teal-50 sm:text-base">
             Login ID: {studentData.student_login_id || '-'}
           </p>
         </div>
@@ -180,6 +206,51 @@ export default async function TeacherStudentDetailPage({
             )}
           </section>
         </div>
+
+        <section className="mt-6 rounded-3xl bg-white p-6 shadow-lg">
+          <h2 className="text-lg font-semibold text-slate-800">Progress by Unit</h2>
+
+          {unitProgressList.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-600">No unit progress yet.</p>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-100 text-slate-700">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Unit</th>
+                    <th className="px-4 py-3 font-semibold">Last completed order</th>
+                    <th className="px-4 py-3 font-semibold">Last studied</th>
+                    <th className="px-4 py-3 font-semibold">Completed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unitProgressList.map((item) => (
+                    <tr key={item.unit} className="border-t border-slate-100">
+                      <td className="px-4 py-3 text-slate-800">{item.unit}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {item.last_order_completed ?? 0}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {formatDate(item.last_studied_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        {item.is_completed ? (
+                          <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
+                            No
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
 
         <section className="mt-6 rounded-3xl bg-white p-6 shadow-lg">
           <h2 className="text-lg font-semibold text-slate-800">Recent Attempts</h2>

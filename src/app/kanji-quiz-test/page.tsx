@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 type QuizOption = {
   label: string;
@@ -24,6 +25,7 @@ type BatchResponse = {
   unit: string;
   lastOrderCompleted: number;
   mode?: string;
+  lockedToUnit?: boolean;
   finished?: boolean;
   questions: QuizQuestion[];
 };
@@ -42,15 +44,19 @@ type QuizMode =
   | "normal"
   | "review-wrong"
   | "review-studied"
-  | "practice-set";
+  | "practice-set"
+  | "practice-unit";
 
 type PracticeTarget = {
   unit: string;
   startOrder: number;
-  endOrder: number;
+  endOrder?: number;
 };
 
 export default function KanjiQuizTestPage() {
+  const searchParams = useSearchParams();
+  const requestedUnit = (searchParams.get("unit") ?? "").trim();
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -74,6 +80,7 @@ export default function KanjiQuizTestPage() {
   const [lastCompletedSet, setLastCompletedSet] = useState<PracticeTarget | null>(
     null
   );
+  const [showUnitStartScreen, setShowUnitStartScreen] = useState(false);
 
   const [windowWidth, setWindowWidth] = useState(1200);
 
@@ -128,10 +135,19 @@ export default function KanjiQuizTestPage() {
     const params = new URLSearchParams();
     params.set("mode", mode);
 
+    if (mode === "normal" && requestedUnit) {
+      params.set("unit", requestedUnit);
+    }
+
     if (mode === "practice-set" && practiceTarget) {
       params.set("unit", practiceTarget.unit);
       params.set("startOrder", String(practiceTarget.startOrder));
-      params.set("endOrder", String(practiceTarget.endOrder));
+      params.set("endOrder", String(practiceTarget.endOrder ?? 0));
+    }
+
+    if (mode === "practice-unit" && practiceTarget) {
+      params.set("unit", practiceTarget.unit);
+      params.set("startOrder", String(practiceTarget.startOrder));
     }
 
     const res = await fetch(`/api/kanji-quiz-test?${params.toString()}`, {
@@ -158,8 +174,14 @@ export default function KanjiQuizTestPage() {
   }
 
   useEffect(() => {
+    if (requestedUnit) {
+      setShowUnitStartScreen(true);
+      setLoading(false);
+      return;
+    }
+
     loadBatch("normal");
-  }, []);
+  }, [requestedUnit]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -202,6 +224,7 @@ export default function KanjiQuizTestPage() {
         advanceCount: batch.questions.length,
         attempts,
         mode: quizMode,
+        lockToUnit: batch.lockedToUnit === true,
       }),
     });
 
@@ -345,10 +368,29 @@ export default function KanjiQuizTestPage() {
 
   async function handleMenuAction(mode: QuizMode) {
     setMenuOpen(false);
+
+    if (mode === "practice-unit") {
+      const targetUnit = batch?.unit || requestedUnit;
+      if (!targetUnit) return;
+      await loadBatch("practice-unit", {
+        unit: targetUnit,
+        startOrder: 1,
+      });
+      return;
+    }
+
     await loadBatch(mode);
   }
 
   async function handleDoFiveMore() {
+    if (quizMode === "practice-unit" && lastCompletedSet?.endOrder) {
+      await loadBatch("practice-unit", {
+        unit: lastCompletedSet.unit,
+        startOrder: lastCompletedSet.endOrder + 1,
+      });
+      return;
+    }
+
     await loadBatch("normal");
   }
 
@@ -356,6 +398,20 @@ export default function KanjiQuizTestPage() {
     if (!lastCompletedSet) return;
     setMenuOpen(false);
     await loadBatch("practice-set", lastCompletedSet);
+  }
+
+  async function handleContinueRequestedUnit() {
+    setShowUnitStartScreen(false);
+    await loadBatch("normal");
+  }
+
+  async function handlePracticeRequestedUnit() {
+    if (!requestedUnit) return;
+    setShowUnitStartScreen(false);
+    await loadBatch("practice-unit", {
+      unit: requestedUnit,
+      startOrder: 1,
+    });
   }
 
   function handleFinishForToday() {
@@ -409,13 +465,33 @@ export default function KanjiQuizTestPage() {
           flexDirection: isMobile ? "column" : "row",
         }}
       >
-        <button
-          type="button"
-          onClick={() => loadBatch("normal")}
-          style={styles.emptyPrimaryButton}
-        >
-          Back to quiz
-        </button>
+        {requestedUnit ? (
+          <>
+            <button
+              type="button"
+              onClick={handleContinueRequestedUnit}
+              style={styles.emptyPrimaryButton}
+            >
+              Continue this unit
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePracticeRequestedUnit}
+              style={styles.emptySecondaryButton}
+            >
+              Practice from the beginning
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => loadBatch("normal")}
+            style={styles.emptyPrimaryButton}
+          >
+            Back to quiz
+          </button>
+        )}
 
         <button
           type="button"
@@ -468,6 +544,13 @@ export default function KanjiQuizTestPage() {
       };
     }
 
+    if (quizMode === "practice-unit") {
+      return {
+        title: "You reached the end of this unit",
+        message: "You can go back, review, or start this unit again anytime.",
+      };
+    }
+
     return {
       title: "No questions available",
       message: "Please wait a moment, or go back to the quiz.",
@@ -479,6 +562,56 @@ export default function KanjiQuizTestPage() {
       <main style={styles.page}>
         <div style={styles.centerWrap}>
           <div style={styles.loadingCard}>Please wait a moment...</div>
+        </div>
+      </main>
+    );
+  }
+
+  if (showUnitStartScreen && requestedUnit) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div
+            style={{
+              ...styles.emptyCard,
+              width: isMobile ? "92%" : 760,
+            }}
+          >
+            <h2 style={styles.emptyTitle}>Ready to study?</h2>
+            <p style={styles.emptyText}>
+              Unit: <strong>{requestedUnit}</strong>
+            </p>
+            <div
+              style={{
+                ...styles.emptyButtons,
+                flexDirection: isMobile ? "column" : "row",
+              }}
+            >
+              <button
+                type="button"
+                onClick={handleContinueRequestedUnit}
+                style={styles.emptyPrimaryButton}
+              >
+                Continue
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePracticeRequestedUnit}
+                style={styles.emptySecondaryButton}
+              >
+                Practice from the beginning
+              </button>
+
+              <button
+                type="button"
+                onClick={() => loadBatch("review-wrong")}
+                style={styles.emptySecondaryButton}
+              >
+                Review wrong answers
+              </button>
+            </div>
+          </div>
         </div>
       </main>
     );
@@ -532,14 +665,21 @@ export default function KanjiQuizTestPage() {
             </p>
             <button
               type="button"
-              onClick={() => loadBatch("normal")}
+              onClick={() => {
+                if (requestedUnit) {
+                  setShowFinishMessage(false);
+                  setShowUnitStartScreen(true);
+                  return;
+                }
+                loadBatch("normal");
+              }}
               style={{
                 ...styles.finishButton,
                 fontSize: isMobile ? 16 : 18,
                 padding: isMobile ? "12px 20px" : "14px 26px",
               }}
             >
-              Start again
+              {requestedUnit ? "Back to unit menu" : "Start again"}
             </button>
           </div>
         </div>
@@ -635,6 +775,24 @@ export default function KanjiQuizTestPage() {
                 Practice this set again
               </button>
             ) : null}
+
+            {(requestedUnit || batch?.unit) && (
+              <button
+                type="button"
+                onClick={() =>
+                  loadBatch("practice-unit", {
+                    unit: batch?.unit || requestedUnit,
+                    startOrder: 1,
+                  })
+                }
+                style={{
+                  ...styles.reviewWrongButton,
+                  width: isMobile ? "100%" : undefined,
+                }}
+              >
+                Practice from the beginning
+              </button>
+            )}
 
             {lastSetWrongCount > 0 ? (
               <button
@@ -740,6 +898,34 @@ export default function KanjiQuizTestPage() {
                       right: 0,
                     }}
                   >
+                    {requestedUnit ? (
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.menuItem,
+                          fontSize: isMobile ? 14 : 16,
+                          padding: isMobile ? "12px 14px" : "14px 16px",
+                        }}
+                        onClick={handleContinueRequestedUnit}
+                      >
+                        Continue this unit
+                      </button>
+                    ) : null}
+
+                    {(requestedUnit || batch.unit) ? (
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.menuItem,
+                          fontSize: isMobile ? 14 : 16,
+                          padding: isMobile ? "12px 14px" : "14px 16px",
+                        }}
+                        onClick={() => handleMenuAction("practice-unit")}
+                      >
+                        Practice from the beginning
+                      </button>
+                    ) : null}
+
                     <button
                       type="button"
                       style={{

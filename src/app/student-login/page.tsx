@@ -32,10 +32,12 @@ export default function StudentLoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [windowWidth, setWindowWidth] = useState(1200)
+  const [windowHeight, setWindowHeight] = useState(900)
 
   useEffect(() => {
     function handleResize() {
       setWindowWidth(window.innerWidth)
+      setWindowHeight(window.innerHeight)
     }
 
     handleResize()
@@ -45,8 +47,10 @@ export default function StudentLoginPage() {
 
   const isMobile = windowWidth <= 768
   const isSmallMobile = windowWidth <= 430
+  const isShortDesktop = !isMobile && windowHeight < 860
 
-  const iconSize = isMobile ? (isSmallMobile ? 28 : 32) : 44
+  const pagePadding = isMobile ? 8 : 12
+  const iconSize = isMobile ? (isSmallMobile ? 28 : 32) : isShortDesktop ? 38 : 44
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -84,8 +88,10 @@ export default function StudentLoginPage() {
       style={{
         minHeight: '100dvh',
         background: '#f2b400',
-        padding: isMobile ? '10px' : '20px',
+        padding: `${pagePadding}px`,
         color: '#111',
+        overflow: 'hidden',
+        WebkitTextSizeAdjust: '100%',
         fontFamily:
           'Arial, Helvetica, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
         boxSizing: 'border-box',
@@ -93,17 +99,22 @@ export default function StudentLoginPage() {
     >
       <div
         style={{
-          minHeight: isMobile ? 'calc(100dvh - 20px)' : 'calc(100dvh - 40px)',
+          minHeight: `calc(100dvh - ${pagePadding * 2}px)`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
         <div
           style={{
             width: '100%',
             maxWidth: isMobile ? 560 : 1400,
-            minHeight: isMobile ? 'auto' : 'min(900px, calc(100dvh - 40px))',
+            height: isMobile
+              ? 'auto'
+              : isShortDesktop
+              ? 'min(calc(100dvh - 24px), 720px)'
+              : 'min(calc(100dvh - 24px), 860px)',
             background: '#e8e8e8',
             borderRadius: isMobile ? 34 : 999,
             display: 'flex',
@@ -112,8 +123,10 @@ export default function StudentLoginPage() {
             boxSizing: 'border-box',
             padding: isMobile
               ? isSmallMobile
-                ? '20px 14px 24px'
-                : '24px 18px 28px'
+                ? '18px 14px 22px'
+                : '22px 18px 26px'
+              : isShortDesktop
+              ? '20px 32px'
               : '28px 40px',
             overflow: 'hidden',
           }}
@@ -136,12 +149,14 @@ export default function StudentLoginPage() {
                   ? isSmallMobile
                     ? '10px 14px'
                     : '12px 18px'
+                  : isShortDesktop
+                  ? '14px 28px'
                   : '20px 36px',
-                fontSize: isMobile ? (isSmallMobile ? 14 : 16) : 28,
+                fontSize: isMobile ? (isSmallMobile ? 14 : 16) : isShortDesktop ? 22 : 28,
                 textAlign: 'center',
                 lineHeight: 1.25,
-                maxWidth: isMobile ? '100%' : 860,
                 width: isMobile ? '100%' : 'auto',
+                maxWidth: isMobile ? '100%' : 860,
                 boxSizing: 'border-box',
               }}
             >
@@ -151,14 +166,14 @@ export default function StudentLoginPage() {
             <div
               style={{
                 width: '100%',
-                marginTop: isMobile ? 22 : 38,
+                marginTop: isMobile ? 18 : isShortDesktop ? 24 : 38,
               }}
             >
               <div
                 style={{
-                  fontSize: isMobile ? (isSmallMobile ? 22 : 26) : 42,
+                  fontSize: isMobile ? (isSmallMobile ? 22 : 26) : isShortDesktop ? 32 : 42,
                   fontWeight: 900,
-                  lineHeight: 1.1,
+                  lineHeight: 1.08,
                   color: '#111',
                 }}
               >
@@ -167,8 +182,8 @@ export default function StudentLoginPage() {
 
               <h1
                 style={{
-                  margin: isMobile ? '8px 0 0' : '10px 0 0',
-                  fontSize: isMobile ? (isSmallMobile ? 46 : 58) : 108,
+                  margin: isMobile ? '6px 0 0' : '8px 0 0',
+                  fontSize: isMobile ? (isSmallMobile ? 46 : 58) : isShortDesktop ? 76 : 108,
                   fontWeight: 900,
                   letterSpacing: '-0.05em',
                   lineHeight: 0.95,
@@ -184,8 +199,8 @@ export default function StudentLoginPage() {
               onSubmit={handleSubmit}
               style={{
                 width: '100%',
-                maxWidth: isMobile ? '100%' : 720,
-                marginTop: isMobile ? 24 : 34,
+                maxWidth: isMobile ? '100%' : isShortDesktop ? 640 : 720,
+                marginTop: isMobile ? 18 : isShortDesktop ? 20 : 34,
               }}
             >
               <div style={{ position: 'relative' }}>
@@ -193,19 +208,19 @@ export default function StudentLoginPage() {
                   <div
                     style={{
                       position: 'absolute',
-                      left: -54,
-                      top: -14,
+                      left: isShortDesktop ? -40 : -54,
+                      top: isShortDesktop ? -10 : -14,
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: 12,
+                      gap: isShortDesktop ? 8 : 12,
                     }}
                     aria-hidden="true"
                   >
                     <span
                       style={{
                         display: 'block',
-                        height: 10,
-                        width: 42,
+                        height: isShortDesktop ? 8 : 10,
+                        width: isShortDesktop ? 34 : 42,
                         borderRadius: 999,
                         background: '#f2b400',
                         transform: 'rotate(45deg)',
@@ -214,8 +229,8 @@ export default function StudentLoginPage() {
                     <span
                       style={{
                         display: 'block',
-                        height: 10,
-                        width: 48,
+                        height: isShortDesktop ? 8 : 10,
+                        width: isShortDesktop ? 40 : 48,
                         borderRadius: 999,
                         background: '#f2b400',
                       }}
@@ -223,8 +238,8 @@ export default function StudentLoginPage() {
                     <span
                       style={{
                         display: 'block',
-                        height: 10,
-                        width: 36,
+                        height: isShortDesktop ? 8 : 10,
+                        width: isShortDesktop ? 30 : 36,
                         borderRadius: 999,
                         background: '#f2b400',
                         transform: 'rotate(-45deg)',
@@ -241,7 +256,9 @@ export default function StudentLoginPage() {
                     padding: isMobile
                       ? isSmallMobile
                         ? '18px 12px 24px'
-                        : '22px 16px 28px'
+                        : '20px 16px 26px'
+                      : isShortDesktop
+                      ? '24px 28px 30px'
                       : '34px 38px 42px',
                     boxShadow: isMobile ? '0 10px 0 #d49f00' : '0 18px 0 #d49f00',
                   }}
@@ -251,12 +268,12 @@ export default function StudentLoginPage() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: isMobile ? 10 : 18,
-                      marginBottom: isMobile ? 12 : 20,
+                      marginBottom: isMobile ? 12 : 18,
                     }}
                   >
                     <div
                       style={{
-                        width: isMobile ? 42 : 70,
+                        width: isMobile ? 42 : isShortDesktop ? 58 : 70,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -273,7 +290,7 @@ export default function StudentLoginPage() {
                       placeholder="Username"
                       style={{
                         width: '100%',
-                        height: isMobile ? (isSmallMobile ? 52 : 58) : 86,
+                        height: isMobile ? (isSmallMobile ? 52 : 58) : isShortDesktop ? 70 : 86,
                         borderRadius: 999,
                         border: 'none',
                         outline: 'none',
@@ -283,8 +300,10 @@ export default function StudentLoginPage() {
                           ? isSmallMobile
                             ? '0 18px'
                             : '0 20px'
+                          : isShortDesktop
+                          ? '0 26px'
                           : '0 34px',
-                        fontSize: isMobile ? (isSmallMobile ? 18 : 22) : 34,
+                        fontSize: isMobile ? (isSmallMobile ? 18 : 22) : isShortDesktop ? 28 : 34,
                         boxSizing: 'border-box',
                       }}
                     />
@@ -295,12 +314,11 @@ export default function StudentLoginPage() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: isMobile ? 10 : 18,
-                      marginBottom: 0,
                     }}
                   >
                     <div
                       style={{
-                        width: isMobile ? 42 : 70,
+                        width: isMobile ? 42 : isShortDesktop ? 58 : 70,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -318,7 +336,7 @@ export default function StudentLoginPage() {
                       placeholder="********"
                       style={{
                         width: '100%',
-                        height: isMobile ? (isSmallMobile ? 52 : 58) : 86,
+                        height: isMobile ? (isSmallMobile ? 52 : 58) : isShortDesktop ? 70 : 86,
                         borderRadius: 999,
                         border: 'none',
                         outline: 'none',
@@ -328,8 +346,10 @@ export default function StudentLoginPage() {
                           ? isSmallMobile
                             ? '0 18px'
                             : '0 20px'
+                          : isShortDesktop
+                          ? '0 26px'
                           : '0 34px',
-                        fontSize: isMobile ? (isSmallMobile ? 18 : 22) : 34,
+                        fontSize: isMobile ? (isSmallMobile ? 18 : 22) : isShortDesktop ? 28 : 34,
                         boxSizing: 'border-box',
                       }}
                     />
@@ -355,23 +375,39 @@ export default function StudentLoginPage() {
                   <div
                     style={{
                       position: 'absolute',
-                      right: isMobile ? 34 : 84,
-                      bottom: isMobile ? -30 : -58,
+                      right: isMobile ? 34 : isShortDesktop ? 70 : 84,
+                      bottom: isMobile ? -30 : isShortDesktop ? -48 : -58,
                       width: 0,
                       height: 0,
-                      borderLeft: isMobile ? '42px solid transparent' : '86px solid transparent',
-                      borderTop: isMobile ? '32px solid #d49f00' : '64px solid #d49f00',
+                      borderLeft: isMobile
+                        ? '42px solid transparent'
+                        : isShortDesktop
+                        ? '68px solid transparent'
+                        : '86px solid transparent',
+                      borderTop: isMobile
+                        ? '32px solid #d49f00'
+                        : isShortDesktop
+                        ? '52px solid #d49f00'
+                        : '64px solid #d49f00',
                     }}
                   />
                   <div
                     style={{
                       position: 'absolute',
-                      right: isMobile ? 42 : 98,
-                      bottom: isMobile ? -20 : -40,
+                      right: isMobile ? 42 : isShortDesktop ? 80 : 98,
+                      bottom: isMobile ? -20 : isShortDesktop ? -34 : -40,
                       width: 0,
                       height: 0,
-                      borderLeft: isMobile ? '30px solid transparent' : '62px solid transparent',
-                      borderTop: isMobile ? '22px solid #f2b400' : '44px solid #f2b400',
+                      borderLeft: isMobile
+                        ? '30px solid transparent'
+                        : isShortDesktop
+                        ? '48px solid transparent'
+                        : '62px solid transparent',
+                      borderTop: isMobile
+                        ? '22px solid #f2b400'
+                        : isShortDesktop
+                        ? '36px solid #f2b400'
+                        : '44px solid #f2b400',
                     }}
                   />
                 </div>
@@ -381,7 +417,7 @@ export default function StudentLoginPage() {
                 style={{
                   display: 'flex',
                   justifyContent: 'center',
-                  marginTop: isMobile ? 42 : 72,
+                  marginTop: isMobile ? 34 : isShortDesktop ? 46 : 64,
                 }}
               >
                 <button
@@ -393,12 +429,14 @@ export default function StudentLoginPage() {
                     background: '#e53935',
                     color: '#fff',
                     fontWeight: 900,
-                    fontSize: isMobile ? (isSmallMobile ? 22 : 26) : 34,
+                    fontSize: isMobile ? (isSmallMobile ? 22 : 26) : isShortDesktop ? 28 : 34,
                     letterSpacing: '0.06em',
                     padding: isMobile
                       ? isSmallMobile
                         ? '14px 28px'
                         : '16px 34px'
+                      : isShortDesktop
+                      ? '16px 42px'
                       : '20px 54px',
                     cursor: 'pointer',
                     boxShadow: isMobile ? '0 7px 0 #111' : '0 10px 0 #111',

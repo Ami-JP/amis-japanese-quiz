@@ -399,7 +399,22 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
     const db = supabase as any;
-    const mode = request.nextUrl.searchParams.get("mode") ?? "normal";
+
+    const mode =
+      (request.nextUrl.searchParams.get("mode") as
+        | "normal"
+        | "review-wrong"
+        | "review-studied"
+        | "practice-set"
+        | "practice-unit") ?? "normal";
+
+    const requestedUnit = normalizeText(request.nextUrl.searchParams.get("unit"));
+    const startOrderParam = Number(
+      request.nextUrl.searchParams.get("startOrder") ?? 0
+    );
+    const endOrderParam = Number(
+      request.nextUrl.searchParams.get("endOrder") ?? 0
+    );
 
     const { account, errorResponse } = await getLoggedInAccount(db);
     if (!account) {
@@ -446,6 +461,7 @@ export async function GET(request: NextRequest) {
           unit: account.current_unit ?? "",
           lastOrderCompleted: progress?.last_order_completed ?? 0,
           mode,
+          lockedToUnit: false,
           finished: true,
           questions: [],
         });
@@ -468,17 +484,16 @@ export async function GET(request: NextRequest) {
         unit: account.current_unit ?? sourceRows[0]?.unit ?? "",
         lastOrderCompleted: progress?.last_order_completed ?? 0,
         mode,
+        lockedToUnit: false,
         finished: sourceRows.length === 0,
         questions: makeQuizItems(sourceRows, globalPool),
       });
     }
 
     if (mode === "practice-set") {
-      const unit = request.nextUrl.searchParams.get("unit");
-      const startOrder = Number(
-        request.nextUrl.searchParams.get("startOrder") ?? 0
-      );
-      const endOrder = Number(request.nextUrl.searchParams.get("endOrder") ?? 0);
+      const unit = requestedUnit;
+      const startOrder = startOrderParam;
+      const endOrder = endOrderParam;
 
       if (!unit || !startOrder || !endOrder) {
         return NextResponse.json(
@@ -500,9 +515,7 @@ export async function GET(request: NextRequest) {
           .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
       );
 
-      const progress = account.current_unit
-        ? await getCurrentProgress(db, account.id, account.current_unit)
-        : null;
+      const progress = await getCurrentProgress(db, account.id, unit);
 
       return NextResponse.json({
         account: {
@@ -512,19 +525,61 @@ export async function GET(request: NextRequest) {
         unit,
         lastOrderCompleted: progress?.last_order_completed ?? 0,
         mode,
+        lockedToUnit: true,
         finished: sourceRows.length === 0,
         questions: makeQuizItems(sourceRows, unitPool),
       });
     }
 
-    if (!account.current_unit) {
+    if (mode === "practice-unit") {
+      const unit = requestedUnit;
+      const startOrder = startOrderParam > 0 ? startOrderParam : 1;
+
+      if (!unit) {
+        return NextResponse.json(
+          { error: "unit is required." },
+          { status: 400 }
+        );
+      }
+
+      const unitPool = await fetchKanjiPool(db, unit);
+
+      const orderedRows = unitPool
+        .filter(
+          (row) =>
+            row.order_in_unit !== null && row.order_in_unit >= startOrder
+        )
+        .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
+        .slice(0, QUESTION_LIMIT);
+
+      const sourceRows = shuffleArray(orderedRows);
+
+      const progress = await getCurrentProgress(db, account.id, unit);
+
+      return NextResponse.json({
+        account: {
+          display_name: account.display_name,
+          student_login_id: account.student_login_id,
+        },
+        unit,
+        lastOrderCompleted: progress?.last_order_completed ?? 0,
+        mode,
+        lockedToUnit: true,
+        finished: sourceRows.length === 0,
+        questions: makeQuizItems(sourceRows, unitPool),
+      });
+    }
+
+    const lockedToUnit = Boolean(requestedUnit);
+    let activeUnit = requestedUnit || account.current_unit;
+
+    if (!activeUnit) {
       return NextResponse.json(
         { error: "current_unit is empty." },
         { status: 400 }
       );
     }
 
-    let activeUnit = account.current_unit;
     let activePool = await fetchKanjiPool(db, activeUnit);
     let progress = await getCurrentProgress(db, account.id, activeUnit);
     let activeLastOrderCompleted = progress?.last_order_completed ?? 0;
@@ -538,7 +593,7 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
       .slice(0, QUESTION_LIMIT);
 
-    if (orderedRows.length === 0) {
+    if (orderedRows.length === 0 && !lockedToUnit) {
       const { data: nextUnitRowRaw, error: nextUnitError } = await db
         .from("kanji_hints")
         .select("unit")
@@ -592,7 +647,9 @@ export async function GET(request: NextRequest) {
         }
 
         activePool = await fetchKanjiPool(db, activeUnit);
-        activeLastOrderCompleted = 0;
+        progress = await getCurrentProgress(db, account.id, activeUnit);
+        activeLastOrderCompleted = progress?.last_order_completed ?? 0;
+
         orderedRows = activePool
           .filter(
             (row) =>
@@ -614,6 +671,7 @@ export async function GET(request: NextRequest) {
       unit: activeUnit,
       lastOrderCompleted: activeLastOrderCompleted,
       mode,
+      lockedToUnit,
       finished: sourceRows.length === 0,
       questions: makeQuizItems(sourceRows, activePool),
     });
@@ -634,8 +692,15 @@ export async function POST(request: NextRequest) {
     const unit = typeof body.unit === "string" ? body.unit : "";
     const advanceCount =
       typeof body.advanceCount === "number" ? body.advanceCount : 0;
-    const mode = (body.mode as string) ?? "normal";
+    const mode =
+      (body.mode as
+        | "normal"
+        | "review-wrong"
+        | "review-studied"
+        | "practice-set"
+        | "practice-unit") ?? "normal";
     const attempts = (body.attempts ?? []) as AttemptRow[];
+    const lockToUnit = body.lockToUnit === true;
 
     const { account, errorResponse } = await getLoggedInAccount(db);
     if (!account) {
@@ -699,12 +764,26 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      await moveToNextUnitIfNeeded({
-        supabase,
-        accountId: account.id,
-        currentUnit: unit,
-        newLastOrderCompleted,
-      });
+      const { error: updateCurrentUnitError } = await db
+        .from("student_accounts")
+        .update({ current_unit: unit })
+        .eq("id", account.id);
+
+      if (updateCurrentUnitError) {
+        return NextResponse.json(
+          { error: updateCurrentUnitError.message },
+          { status: 400 }
+        );
+      }
+
+      if (!lockToUnit) {
+        await moveToNextUnitIfNeeded({
+          supabase,
+          accountId: account.id,
+          currentUnit: unit,
+          newLastOrderCompleted,
+        });
+      }
     }
 
     return NextResponse.json({ ok: true });
