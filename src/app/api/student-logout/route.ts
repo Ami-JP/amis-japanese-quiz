@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const cookieStore = await cookies();
     const rawToken = cookieStore.get("student_session")?.value;
@@ -21,11 +21,12 @@ export async function POST() {
         .eq("session_token_hash", tokenHash);
     }
 
-    const res = NextResponse.json({ ok: true });
+    const url = new URL(request.url);
+    const res = NextResponse.redirect(new URL("/student-login", url));
 
     res.cookies.set("student_session", "", {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: 0,

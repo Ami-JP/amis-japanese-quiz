@@ -75,7 +75,7 @@ export default function StudentLoginPage() {
         return
       }
 
-      router.push('/kanji-quiz-test')
+      router.push("/student-home");
       router.refresh()
     } catch {
       setError('Unexpected error. Please try again.')

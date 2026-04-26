@@ -20,6 +20,8 @@ type ReadingQuestion = {
   id: string | number | null;
   unit: string;
   order_in_unit: number;
+  kanji_order_in_unit?: number | null;
+  reading_variant_order?: number | null;
   prompt: string;
   translation_en: string;
   target_text: string;
@@ -44,9 +46,12 @@ type BatchResponse = {
   };
   unit: string;
   difficulty_tier: string;
-  mode: "normal" | "practice";
+  mode: "normal" | "practice" | "practice-set";
+  startOrder?: number | null;
+  endOrder?: number | null;
   lastOrderCompleted: number;
   finished: boolean;
+  hasMoreReadingVariants?: boolean;
   questions: ReadingQuestion[];
 };
 
@@ -54,6 +59,8 @@ type AttemptRow = {
   question_id: string | number | null;
   unit: string | null;
   order_in_unit: number;
+  kanji_order_in_unit?: number | null;
+  reading_variant_order?: number | null;
   prompt: string;
   target_text: string;
   user_answer: string;
@@ -177,10 +184,19 @@ export default function KanjiReadingQuizPage() {
   const searchParams = useSearchParams();
   const unit = (searchParams.get("unit") ?? "").trim();
   const difficultyTier = (searchParams.get("tier") ?? "normal").trim();
-  const initialMode =
-    (searchParams.get("mode") ?? "normal").trim() === "practice"
+  const rawMode = (searchParams.get("mode") ?? "normal").trim();
+  const startOrderParam = (searchParams.get("startOrder") ?? "").trim();
+  const endOrderParam = (searchParams.get("endOrder") ?? "").trim();
+
+  const initialMode: "normal" | "practice" | "practice-set" =
+    rawMode === "practice"
       ? "practice"
+      : rawMode === "practice-set"
+      ? "practice-set"
       : "normal";
+
+  const startOrder = startOrderParam ? Number(startOrderParam) : null;
+  const endOrder = endOrderParam ? Number(endOrderParam) : null;
 
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 900;
@@ -203,16 +219,19 @@ export default function KanjiReadingQuizPage() {
   const [wasCorrect, setWasCorrect] = useState<boolean | null>(null);
   const [showComplete, setShowComplete] = useState(false);
 
-  const [reviewQuestions, setReviewQuestions] = useState<ReadingQuestion[] | null>(
-    null
-  );
+  const [reviewQuestions, setReviewQuestions] = useState<
+    ReadingQuestion[] | null
+  >(null);
   const [currentMode, setCurrentMode] = useState<
-    "normal" | "practice" | "review"
+    "normal" | "practice" | "practice-set" | "review"
   >(initialMode);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  async function loadBatch(mode: "normal" | "practice") {
+  async function loadBatch(
+    mode: "normal" | "practice" | "practice-set",
+    options?: { startOrder?: number | null; endOrder?: number | null }
+  ) {
     if (!unit) {
       setError("unit is required in the URL.");
       setLoading(false);
@@ -237,6 +256,18 @@ export default function KanjiReadingQuizPage() {
     params.set("unit", unit);
     params.set("tier", difficultyTier);
     params.set("mode", mode);
+
+    if (mode === "practice-set") {
+      const nextStart = options?.startOrder ?? startOrder;
+      const nextEnd = options?.endOrder ?? endOrder;
+
+      if (nextStart != null) {
+        params.set("startOrder", String(nextStart));
+      }
+      if (nextEnd != null) {
+        params.set("endOrder", String(nextEnd));
+      }
+    }
 
     const res = await fetch(`/api/kanji-reading-quiz?${params.toString()}`, {
       credentials: "include",
@@ -265,8 +296,11 @@ export default function KanjiReadingQuizPage() {
   }
 
   useEffect(() => {
-    loadBatch(initialMode as "normal" | "practice");
-  }, [unit, difficultyTier, initialMode]);
+    loadBatch(initialMode, {
+      startOrder,
+      endOrder,
+    });
+  }, [unit, difficultyTier, initialMode, startOrderParam, endOrderParam]);
 
   const activeQuestions = reviewQuestions ?? batch?.questions ?? [];
 
@@ -340,11 +374,12 @@ export default function KanjiReadingQuizPage() {
 
         if (text.slice(cursor, cursor + token.length) === token) {
           nodes.push(
-            <ruby key={`${keyPrefix}-${key}`} style={styles.inlineRuby}>
-              {token}
-              <rt style={styles.inlineRt}>{ruby}</rt>
-            </ruby>
+            <span key={`${keyPrefix}-${key}`} style={styles.rubyWord}>
+              <span style={styles.rubyText}>{ruby}</span>
+              <span>{token}</span>
+            </span>
           );
+
           cursor += token.length;
           key += 1;
           matched = true;
@@ -406,6 +441,8 @@ export default function KanjiReadingQuizPage() {
           question_id: currentQuestion.id,
           unit: currentQuestion.unit,
           order_in_unit: currentQuestion.order_in_unit,
+          kanji_order_in_unit: currentQuestion.kanji_order_in_unit ?? null,
+          reading_variant_order: currentQuestion.reading_variant_order ?? null,
           prompt: currentQuestion.prompt,
           target_text: currentQuestion.target_text,
           user_answer: value,
@@ -499,6 +536,38 @@ export default function KanjiReadingQuizPage() {
     }, 80);
   }
 
+  function goHome() {
+    window.location.href = "/student-home";
+  }
+
+  function goToMeaningQuiz() {
+    if (!batch) return;
+
+    if (batch.mode === "practice-set" && batch.startOrder && batch.endOrder) {
+      window.location.href = `/kanji-quiz-test?unit=${encodeURIComponent(
+        batch.unit
+      )}&tier=${encodeURIComponent(
+        batch.difficulty_tier
+      )}&mode=normal&startOrder=${batch.startOrder}&endOrder=${batch.endOrder}`;
+      return;
+    }
+
+    window.location.href = `/kanji-quiz-test?unit=${encodeURIComponent(
+      batch.unit
+    )}&tier=${encodeURIComponent(batch.difficulty_tier)}&mode=normal`;
+  }
+
+  async function handlePracticeMoreReadings() {
+    if (!batch) return;
+    if (batch.mode !== "practice-set") return;
+    if (batch.startOrder == null || batch.endOrder == null) return;
+
+    await loadBatch("practice-set", {
+      startOrder: batch.startOrder,
+      endOrder: batch.endOrder,
+    });
+  }
+
   function renderReadingLines(value: string, side: "left" | "right") {
     const lines = splitReadingsToLines(value);
     const style =
@@ -535,10 +604,6 @@ export default function KanjiReadingQuizPage() {
         }}
       >
         <div style={styles.hintTopBox}>
-          <div style={styles.hintTopLine}>
-            <strong>意味</strong>
-            <span>{question.meaning_ja}</span>
-          </div>
           <div style={styles.hintTopLine}>
             <strong>Meaning:</strong>
             <span>{question.meaning_en}</span>
@@ -586,6 +651,8 @@ export default function KanjiReadingQuizPage() {
 
   const correctCount = attempts.filter((a) => a.is_correct).length;
   const wrongCount = attempts.filter((a) => !a.is_correct).length;
+  const isPracticeSet = batch?.mode === "practice-set";
+  const hasMoreReadings = batch?.hasMoreReadingVariants === true;
 
   if (loading) {
     return (
@@ -625,11 +692,51 @@ export default function KanjiReadingQuizPage() {
             <p style={styles.messageText}>Wrong: {wrongCount}</p>
 
             <div style={styles.completeButtons}>
+              {isPracticeSet && hasMoreReadings ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handlePracticeMoreReadings}
+                    style={styles.primaryButton}
+                  >
+                    Practice more readings
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={goHome}
+                    style={styles.secondaryButton}
+                  >
+                    Back to Home
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={goHome}
+                    style={styles.primaryButton}
+                  >
+                    Back to Home
+                  </button>
+
+                  {isPracticeSet ? (
+                    <button
+                      type="button"
+                      onClick={handlePracticeMoreReadings}
+                      style={styles.secondaryButton}
+                    >
+                      Review readings again
+                    </button>
+                  ) : null}
+                </>
+              )}
+
               {currentMode !== "review" && wrongCount > 0 ? (
                 <button
                   type="button"
                   onClick={startWrongReview}
-                  style={styles.primaryButton}
+                  style={styles.secondaryButton}
                 >
                   Review wrong answers
                 </button>
@@ -637,11 +744,21 @@ export default function KanjiReadingQuizPage() {
 
               <button
                 type="button"
-                onClick={() => loadBatch("normal")}
-                style={styles.primaryButton}
+                onClick={goToMeaningQuiz}
+                style={styles.secondaryButton}
               >
-                Continue
+                Go to Meaning Quiz
               </button>
+
+              {!isPracticeSet ? (
+                <button
+                  type="button"
+                  onClick={() => loadBatch("normal")}
+                  style={styles.secondaryButton}
+                >
+                  Continue
+                </button>
+              ) : null}
 
               <button
                 type="button"
@@ -682,14 +799,18 @@ export default function KanjiReadingQuizPage() {
       <div
         style={{
           ...styles.appFrame,
-          width: isMobile ? "calc(100vw - 56px)" : "min(1680px, calc(100vw - 72px))",
+          width: isMobile
+            ? "calc(100vw - 56px)"
+            : "min(1680px, calc(100vw - 72px))",
           height: isMobile ? "auto" : "calc(100dvh - 48px)",
         }}
       >
         <div
           style={{
             ...styles.outerBlueEdge,
-            inset: isMobile ? "-10px -10px -4px -10px" : "-12px -12px -4px -12px",
+            inset: isMobile
+              ? "-10px -10px -4px -10px"
+              : "-12px -12px -4px -12px",
           }}
         />
 
@@ -726,7 +847,9 @@ export default function KanjiReadingQuizPage() {
           }}
         >
           <div style={styles.topTitleArea}>
-            <div style={{ ...styles.sparkle, fontSize: isMobile ? 28 : 38 }}>✦</div>
+            <div style={{ ...styles.sparkle, fontSize: isMobile ? 28 : 38 }}>
+              ✦
+            </div>
             <div style={{ textAlign: "center" }}>
               <div
                 style={{
@@ -745,7 +868,9 @@ export default function KanjiReadingQuizPage() {
                 〜この漢字、読めるかな？〜
               </div>
             </div>
-            <div style={{ ...styles.sparkle, fontSize: isMobile ? 28 : 38 }}>✦</div>
+            <div style={{ ...styles.sparkle, fontSize: isMobile ? 28 : 38 }}>
+              ✦
+            </div>
           </div>
 
           {!isMobile ? (
@@ -835,7 +960,7 @@ export default function KanjiReadingQuizPage() {
                     <div style={styles.inputTitleDesktop}>
                       読みを入力
                       <br />
-                      Type the reading
+                      Type in hiragana
                     </div>
 
                     <div style={styles.inputRowDesktop}>
@@ -1070,7 +1195,7 @@ export default function KanjiReadingQuizPage() {
               <div style={styles.inputTitleMobile}>
                 読みを入力
                 <br />
-                Type the reading
+                Type in hiragana
               </div>
 
               <div style={styles.inputRowMobile}>
@@ -1199,7 +1324,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "4px solid #111",
     borderRadius: 28,
     padding: "28px 22px",
-    width: "min(680px, 92vw)",
+    width: "min(720px, 92vw)",
     textAlign: "center",
   },
   messageTitle: {
@@ -1321,7 +1446,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "flex-start",
     paddingTop: 18,
-    transform: "translateX(-8px)",
+    transform: "translateX(-60px)",
   },
   promptWrapDesktop: {
     minWidth: 0,
@@ -1474,6 +1599,24 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.1,
     whiteSpace: "nowrap",
   },
+  rubyWord: {
+    position: "relative",
+    display: "inline-block",
+    paddingTop: "0.3em",
+    lineHeight: 1,
+  },
+  rubyText: {
+    position: "absolute",
+    left: "50%",
+    top: "-0.08em",
+    transform: "translateX(-50%)",
+    fontSize: "0.24em",
+    fontWeight: 900,
+    color: "#244988",
+    lineHeight: 1,
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+  },
   targetWrap: {
     position: "relative",
     display: "inline-flex",
@@ -1488,7 +1631,7 @@ const styles: Record<string, React.CSSProperties> = {
     right: "8%",
     bottom: -2,
     height: 10,
-    background: "#ff6da8",
+    background: "#38a0d8",
     borderRadius: 999,
   },
   inlineRuby: {
@@ -1808,6 +1951,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "12px 22px",
     fontSize: 17,
     fontWeight: 900,
+    cursor: "pointer",
   },
   secondaryButton: {
     border: "none",

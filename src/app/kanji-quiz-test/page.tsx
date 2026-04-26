@@ -262,6 +262,11 @@ export default function KanjiQuizTestPage() {
     }
   }
 
+  function handleBackToHome() {
+    setMenuOpen(false);
+    window.location.href = "/student-home";
+  }
+
   function resetQuestionState() {
     setSelected("");
     setChecked(false);
@@ -394,12 +399,6 @@ export default function KanjiQuizTestPage() {
     await loadBatch("normal");
   }
 
-  async function handlePracticeSetAgain() {
-    if (!lastCompletedSet) return;
-    setMenuOpen(false);
-    await loadBatch("practice-set", lastCompletedSet);
-  }
-
   async function handleContinueRequestedUnit() {
     setShowUnitStartScreen(false);
     await loadBatch("normal");
@@ -415,8 +414,24 @@ export default function KanjiQuizTestPage() {
   }
 
   function handleFinishForToday() {
-    setShowSetComplete(false);
-    setShowFinishMessage(true);
+    window.location.href = "/student-home";
+  }
+
+  function handleGoToReadingQuiz() {
+    const target = lastCompletedSet ?? getPracticeTargetFromBatch(batch);
+
+    if (!target) {
+      window.location.href = `/kanji-reading-quiz?unit=${encodeURIComponent(
+        batch?.unit || requestedUnit || ""
+      )}&tier=normal&mode=normal`;
+      return;
+    }
+
+    window.location.href = `/kanji-reading-quiz?unit=${encodeURIComponent(
+      target.unit
+    )}&tier=normal&mode=practice-set&startOrder=${target.startOrder}&endOrder=${
+      target.endOrder ?? target.startOrder
+    }`;
   }
 
   function getOptionStyle(option: QuizOption): React.CSSProperties {
@@ -472,7 +487,7 @@ export default function KanjiQuizTestPage() {
               onClick={handleContinueRequestedUnit}
               style={styles.emptyPrimaryButton}
             >
-              Continue this unit
+              Continue
             </button>
 
             <button
@@ -480,7 +495,7 @@ export default function KanjiQuizTestPage() {
               onClick={handlePracticeRequestedUnit}
               style={styles.emptySecondaryButton}
             >
-              Practice from the beginning
+              Start from beginning
             </button>
           </>
         ) : (
@@ -500,24 +515,6 @@ export default function KanjiQuizTestPage() {
         >
           Review wrong answers
         </button>
-
-        <button
-          type="button"
-          onClick={() => loadBatch("review-studied")}
-          style={styles.emptySecondaryButton}
-        >
-          Shuffle 10 studied kanji
-        </button>
-
-        {lastCompletedSet ? (
-          <button
-            type="button"
-            onClick={handlePracticeSetAgain}
-            style={styles.emptySecondaryButton}
-          >
-            Practice this set again
-          </button>
-        ) : null}
       </div>
     );
   }
@@ -600,7 +597,7 @@ export default function KanjiQuizTestPage() {
                 onClick={handlePracticeRequestedUnit}
                 style={styles.emptySecondaryButton}
               >
-                Practice from the beginning
+                Start from beginning
               </button>
 
               <button
@@ -666,12 +663,7 @@ export default function KanjiQuizTestPage() {
             <button
               type="button"
               onClick={() => {
-                if (requestedUnit) {
-                  setShowFinishMessage(false);
-                  setShowUnitStartScreen(true);
-                  return;
-                }
-                loadBatch("normal");
+                window.location.href = "/student-home";
               }}
               style={{
                 ...styles.finishButton,
@@ -679,7 +671,7 @@ export default function KanjiQuizTestPage() {
                 padding: isMobile ? "12px 20px" : "14px 26px",
               }}
             >
-              {requestedUnit ? "Back to unit menu" : "Start again"}
+              Back to Home
             </button>
           </div>
         </div>
@@ -740,14 +732,14 @@ export default function KanjiQuizTestPage() {
             >
               <button
                 type="button"
-                onClick={handleDoFiveMore}
+                onClick={handleGoToReadingQuiz}
                 style={{
                   ...styles.setCompletePrimaryButton,
                   width: isMobile ? "100%" : undefined,
                   fontSize: isMobile ? 16 : 18,
                 }}
               >
-                Do 5 more
+                Go to Reading Quiz
               </button>
 
               <button
@@ -759,40 +751,9 @@ export default function KanjiQuizTestPage() {
                   fontSize: isMobile ? 16 : 18,
                 }}
               >
-                Finish for today
+                Back to Home
               </button>
             </div>
-
-            {lastCompletedSet ? (
-              <button
-                type="button"
-                onClick={handlePracticeSetAgain}
-                style={{
-                  ...styles.practiceSetButton,
-                  width: isMobile ? "100%" : undefined,
-                }}
-              >
-                Practice this set again
-              </button>
-            ) : null}
-
-            {(requestedUnit || batch?.unit) && (
-              <button
-                type="button"
-                onClick={() =>
-                  loadBatch("practice-unit", {
-                    unit: batch?.unit || requestedUnit,
-                    startOrder: 1,
-                  })
-                }
-                style={{
-                  ...styles.reviewWrongButton,
-                  width: isMobile ? "100%" : undefined,
-                }}
-              >
-                Practice from the beginning
-              </button>
-            )}
 
             {lastSetWrongCount > 0 ? (
               <button
@@ -804,6 +765,37 @@ export default function KanjiQuizTestPage() {
                 }}
               >
                 Review wrong answers
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={handleDoFiveMore}
+              style={{
+                ...styles.setCompleteSecondaryButton,
+                width: isMobile ? "100%" : undefined,
+                marginTop: 16,
+              }}
+            >
+              Continue 5 more
+            </button>
+
+            {(requestedUnit || batch?.unit) ? (
+              <button
+                type="button"
+                onClick={() =>
+                  loadBatch("practice-unit", {
+                    unit: batch?.unit || requestedUnit,
+                    startOrder: 1,
+                  })
+                }
+                style={{
+                  ...styles.setCompleteSecondaryButton,
+                  width: isMobile ? "100%" : undefined,
+                  marginTop: 12,
+                }}
+              >
+                Start from beginning
               </button>
             ) : null}
           </div>
@@ -908,7 +900,7 @@ export default function KanjiQuizTestPage() {
                         }}
                         onClick={handleContinueRequestedUnit}
                       >
-                        Continue this unit
+                        Continue
                       </button>
                     ) : null}
 
@@ -922,7 +914,7 @@ export default function KanjiQuizTestPage() {
                         }}
                         onClick={() => handleMenuAction("practice-unit")}
                       >
-                        Practice from the beginning
+                        Start from beginning
                       </button>
                     ) : null}
 
@@ -945,35 +937,9 @@ export default function KanjiQuizTestPage() {
                         fontSize: isMobile ? 14 : 16,
                         padding: isMobile ? "12px 14px" : "14px 16px",
                       }}
-                      onClick={() => handleMenuAction("review-studied")}
+                      onClick={handleBackToHome}
                     >
-                      Shuffle 10 studied kanji
-                    </button>
-
-                    {lastCompletedSet ? (
-                      <button
-                        type="button"
-                        style={{
-                          ...styles.menuItem,
-                          fontSize: isMobile ? 14 : 16,
-                          padding: isMobile ? "12px 14px" : "14px 16px",
-                        }}
-                        onClick={handlePracticeSetAgain}
-                      >
-                        Practice this set again
-                      </button>
-                    ) : null}
-
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.menuItem,
-                        fontSize: isMobile ? 14 : 16,
-                        padding: isMobile ? "12px 14px" : "14px 16px",
-                      }}
-                      onClick={() => handleMenuAction("normal")}
-                    >
-                      Back to normal lesson
+                      Back to Home
                     </button>
 
                     <button
@@ -1291,18 +1257,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "14px 24px",
     fontWeight: 900,
     cursor: "pointer",
-  },
-  practiceSetButton: {
-    marginTop: 16,
-    border: "none",
-    borderRadius: 999,
-    background: "#3578e5",
-    color: "#fff",
-    padding: "12px 22px",
-    fontSize: 16,
-    fontWeight: 900,
-    cursor: "pointer",
-    boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
   },
   reviewWrongButton: {
     marginTop: 16,
