@@ -239,6 +239,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#111",
     boxShadow: "0 6px 0 rgba(31,43,61,0.14)",
     transition: "transform 0.12s ease",
+    textAlign: "center",
   },
 
   meaningButton: {
@@ -256,12 +257,16 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   buttonMain: {
+    width: "100%",
+    textAlign: "center",
     fontSize: 22,
     fontWeight: 900,
     lineHeight: 1.05,
   },
 
   buttonSub: {
+    width: "100%",
+    textAlign: "center",
     marginTop: 5,
     fontSize: 14,
     fontWeight: 900,

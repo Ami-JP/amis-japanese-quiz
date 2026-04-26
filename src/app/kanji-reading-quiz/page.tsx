@@ -126,14 +126,32 @@ function useWindowWidth() {
   return windowWidth;
 }
 
-function getPromptFontSize(promptLength: number, isMobile: boolean) {
-  if (isMobile) {
-    if (promptLength <= 8) return 54;
-    if (promptLength <= 12) return 46;
-    if (promptLength <= 16) return 40;
-    if (promptLength <= 22) return 33;
-    if (promptLength <= 28) return 28;
-    return 24;
+function getPromptFontSize(
+  promptLength: number,
+  mode: "desktop" | "tablet" | "phone" | "small-phone"
+) {
+  if (mode === "small-phone") {
+    if (promptLength <= 8) return 34;
+    if (promptLength <= 12) return 30;
+    if (promptLength <= 16) return 26;
+    if (promptLength <= 22) return 22;
+    return 20;
+  }
+
+  if (mode === "phone") {
+    if (promptLength <= 8) return 42;
+    if (promptLength <= 12) return 36;
+    if (promptLength <= 16) return 31;
+    if (promptLength <= 22) return 26;
+    return 22;
+  }
+
+  if (mode === "tablet") {
+    if (promptLength <= 8) return 58;
+    if (promptLength <= 12) return 50;
+    if (promptLength <= 16) return 43;
+    if (promptLength <= 22) return 36;
+    return 30;
   }
 
   if (promptLength <= 8) return 82;
@@ -180,6 +198,18 @@ function splitReadingsToLines(value: string) {
     .filter(Boolean);
 }
 
+function InfoBubble({
+  text,
+  isOpen,
+}: {
+  text: string;
+  isOpen: boolean;
+}) {
+  if (!isOpen) return null;
+
+  return <div style={styles.infoBubble}>{text}</div>;
+}
+
 function KanjiReadingQuizInner() {
   const searchParams = useSearchParams();
   const unit = (searchParams.get("unit") ?? "").trim();
@@ -199,11 +229,21 @@ function KanjiReadingQuizInner() {
   const endOrder = endOrderParam ? Number(endOrderParam) : null;
 
   const windowWidth = useWindowWidth();
-  const isMobile = windowWidth <= 900;
-  const isSmallMobile = windowWidth <= 480;
+  const isDesktop = windowWidth >= 1200;
+  const isTablet = windowWidth >= 700 && windowWidth < 1200;
+  const isSmallPhone = windowWidth < 430;
+  const isPhone = windowWidth < 700;
+  const deviceMode = isDesktop
+    ? "desktop"
+    : isTablet
+    ? "tablet"
+    : isSmallPhone
+    ? "small-phone"
+    : "phone";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState("");
   const [batch, setBatch] = useState<BatchResponse | null>(null);
 
@@ -214,6 +254,8 @@ function KanjiReadingQuizInner() {
   const [showFurigana, setShowFurigana] = useState(false);
   const [showEnglish, setShowEnglish] = useState(false);
   const [showHint, setShowHint] = useState(false);
+  const [showFuriganaHelp, setShowFuriganaHelp] = useState(false);
+  const [showHintHelp, setShowHintHelp] = useState(false);
 
   const [checked, setChecked] = useState(false);
   const [wasCorrect, setWasCorrect] = useState<boolean | null>(null);
@@ -225,8 +267,10 @@ function KanjiReadingQuizInner() {
   const [currentMode, setCurrentMode] = useState<
     "normal" | "practice" | "practice-set" | "review"
   >(initialMode);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   async function loadBatch(
     mode: "normal" | "practice" | "practice-set",
@@ -250,7 +294,10 @@ function KanjiReadingQuizInner() {
     setShowFurigana(false);
     setShowEnglish(false);
     setShowHint(false);
+    setShowFuriganaHelp(false);
+    setShowHintHelp(false);
     setReviewQuestions(null);
+    setMenuOpen(false);
 
     const params = new URLSearchParams();
     params.set("unit", unit);
@@ -302,6 +349,18 @@ function KanjiReadingQuizInner() {
     });
   }, [unit, difficultyTier, initialMode, startOrderParam, endOrderParam]);
 
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const activeQuestions = reviewQuestions ?? batch?.questions ?? [];
 
   const currentQuestion = useMemo(() => {
@@ -314,6 +373,8 @@ function KanjiReadingQuizInner() {
     setShowFurigana(false);
     setShowEnglish(false);
     setShowHint(false);
+    setShowFuriganaHelp(false);
+    setShowHintHelp(false);
     setChecked(false);
     setWasCorrect(null);
 
@@ -530,10 +591,29 @@ function KanjiReadingQuizInner() {
     setShowFurigana(false);
     setShowEnglish(false);
     setShowHint(false);
+    setShowFuriganaHelp(false);
+    setShowHintHelp(false);
+    setMenuOpen(false);
 
     setTimeout(() => {
       inputRef.current?.focus();
     }, 80);
+  }
+
+  async function handleLogout() {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+    setMenuOpen(false);
+
+    try {
+      await fetch("/api/student-logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } finally {
+      window.location.href = "/student-login";
+    }
   }
 
   function goHome() {
@@ -557,6 +637,29 @@ function KanjiReadingQuizInner() {
       startOrder: batch.startOrder,
       endOrder: batch.endOrder,
     });
+  }
+
+  async function handleContinueMenu() {
+    setMenuOpen(false);
+
+    if (
+      batch?.mode === "practice-set" &&
+      batch.startOrder != null &&
+      batch.endOrder != null
+    ) {
+      await loadBatch("practice-set", {
+        startOrder: batch.startOrder,
+        endOrder: batch.endOrder,
+      });
+      return;
+    }
+
+    await loadBatch("normal");
+  }
+
+  async function handleRestartUnit() {
+    setMenuOpen(false);
+    await loadBatch("practice");
   }
 
   function renderReadingLines(value: string, side: "left" | "right") {
@@ -601,9 +704,6 @@ function KanjiReadingQuizInner() {
           </div>
         </div>
 
-        {question.hint_ja ? (
-          <div style={styles.freeHintText}>{question.hint_ja}</div>
-        ) : null}
         {question.hint_en ? (
           <div style={styles.freeHintText}>{question.hint_en}</div>
         ) : null}
@@ -620,7 +720,7 @@ function KanjiReadingQuizInner() {
                 <div
                   style={{
                     ...styles.hintKanji,
-                    fontSize: mobile ? 36 : 48,
+                    fontSize: mobile ? 34 : 48,
                   }}
                 >
                   {item.kanji}
@@ -782,70 +882,169 @@ function KanjiReadingQuizInner() {
 
   const promptFontSize = getPromptFontSize(
     currentQuestion.prompt.length,
-    isMobile
+    deviceMode
   );
+
+  const compactQuestionNumberSize = isDesktop ? 88 : isTablet ? 64 : 52;
+  const compactQuestionFont = isDesktop ? 48 : isTablet ? 34 : 26;
 
   return (
     <main style={styles.page}>
       <div
         style={{
           ...styles.appFrame,
-          width: isMobile
-            ? "calc(100vw - 56px)"
-            : "min(1680px, calc(100vw - 72px))",
-          height: isMobile ? "auto" : "calc(100dvh - 48px)",
+          width: isDesktop
+            ? "min(1680px, calc(100vw - 72px))"
+            : "min(1000px, calc(100vw - 20px))",
+          height: isDesktop ? "calc(100dvh - 48px)" : "auto",
+          minHeight: isDesktop ? undefined : "calc(100dvh - 20px)",
         }}
       >
         <div
           style={{
             ...styles.outerBlueEdge,
-            inset: isMobile
-              ? "-10px -10px -4px -10px"
-              : "-12px -12px -4px -12px",
+            inset: isDesktop
+              ? "-12px -12px -4px -12px"
+              : "-6px -6px -2px -6px",
           }}
         />
 
         <div
           style={{
             ...styles.windowBar,
-            minHeight: isMobile ? 58 : 66,
-            padding: isMobile ? "8px 18px" : "7px 30px",
+            minHeight: isDesktop ? 66 : 58,
+            padding: isDesktop ? "7px 30px" : "8px 14px",
           }}
         >
-          <div style={styles.windowDots}>
-            <span style={{ ...styles.dot, background: "#9ec1f0" }} />
-            <span style={{ ...styles.dot, background: "#e7ef64" }} />
-            <span style={{ ...styles.dot, background: "#f3a0a6" }} />
+          <div style={{ ...styles.windowDots, gap: isDesktop ? 16 : 10 }}>
+            <span
+              style={{
+                ...styles.dot,
+                background: "#9ec1f0",
+                width: isDesktop ? 38 : 24,
+                height: isDesktop ? 38 : 24,
+                borderWidth: isDesktop ? 4 : 3,
+              }}
+            />
+            <span
+              style={{
+                ...styles.dot,
+                background: "#e7ef64",
+                width: isDesktop ? 38 : 24,
+                height: isDesktop ? 38 : 24,
+                borderWidth: isDesktop ? 4 : 3,
+              }}
+            />
+            <span
+              style={{
+                ...styles.dot,
+                background: "#f3a0a6",
+                width: isDesktop ? 38 : 24,
+                height: isDesktop ? 38 : 24,
+                borderWidth: isDesktop ? 4 : 3,
+              }}
+            />
           </div>
+
           <div
             style={{
               ...styles.windowTitle,
-              fontSize: isMobile ? 22 : 27,
+              fontSize: isDesktop ? 27 : isTablet ? 18 : 15,
+              marginLeft: 8,
+              flex: 1,
+              textAlign: "right",
             }}
           >
             Kanji Reading Quiz
+          </div>
+
+          <div ref={menuRef} style={styles.menuWrapInline}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((prev) => !prev)}
+              style={{
+                ...styles.menuButton,
+                fontSize: isDesktop ? 15 : 13,
+                padding: isDesktop ? "9px 14px" : "7px 10px",
+              }}
+            >
+              ☰
+            </button>
+
+            {menuOpen ? (
+              <div
+                style={{
+                  ...styles.menuDropdown,
+                  right: 0,
+                  minWidth: isDesktop ? 220 : 190,
+                }}
+              >
+                <button
+                  type="button"
+                  style={styles.menuItem}
+                  onClick={handleContinueMenu}
+                >
+                  Continue
+                </button>
+
+                <button
+                  type="button"
+                  style={styles.menuItem}
+                  onClick={handleRestartUnit}
+                >
+                  Start from beginning
+                </button>
+
+                <button
+                  type="button"
+                  style={styles.menuItem}
+                  onClick={goHome}
+                >
+                  Back to Home
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    ...styles.menuItem,
+                    borderBottom: "none",
+                    color: "#b42318",
+                  }}
+                  onClick={handleLogout}
+                >
+                  {loggingOut ? "Logging out..." : "Logout"}
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
 
         <div
           style={{
             ...styles.contentOuter,
-            padding: isMobile ? "8px 12px 6px" : "4px 24px 2px",
+            padding: isDesktop ? "4px 24px 2px" : isTablet ? "8px 14px 20px" : "8px 12px 18px",
             display: "flex",
             flexDirection: "column",
-            gap: isMobile ? 8 : 1,
-            minHeight: isMobile ? "auto" : "calc(100% - 66px)",
+            gap: isDesktop ? 1 : 10,
+            minHeight: isDesktop ? "calc(100% - 66px)" : "auto",
           }}
         >
           <div style={styles.topTitleArea}>
-            <div style={{ ...styles.sparkle, fontSize: isMobile ? 28 : 38 }}>
+            <div style={{ ...styles.sparkle, fontSize: isDesktop ? 38 : 24 }}>
               ✦
             </div>
             <div style={{ textAlign: "center" }}>
               <div
                 style={{
                   ...styles.bigTitle,
-                  fontSize: isMobile ? (isSmallMobile ? 24 : 30) : 44,
+                  fontSize: isDesktop
+                    ? 44
+                    : isTablet
+                    ? 32
+                    : isSmallPhone
+                    ? 24
+                    : 28,
+                  lineHeight: isDesktop ? 1.03 : 1.06,
                 }}
               >
                 CAN YOU READ THIS KANJI?
@@ -853,28 +1052,41 @@ function KanjiReadingQuizInner() {
               <div
                 style={{
                   ...styles.smallTitle,
-                  fontSize: isMobile ? 16 : 22,
+                  fontSize: isDesktop ? 22 : isTablet ? 18 : 15,
                 }}
               >
                 〜この漢字、読めるかな？〜
               </div>
             </div>
-            <div style={{ ...styles.sparkle, fontSize: isMobile ? 28 : 38 }}>
+            <div style={{ ...styles.sparkle, fontSize: isDesktop ? 38 : 24 }}>
               ✦
             </div>
           </div>
 
-          {!isMobile ? (
+          {isDesktop ? (
             <div style={styles.desktopLayout}>
               <div style={styles.desktopLeftButtons}>
-                <button
-                  type="button"
-                  onClick={() => setShowFurigana((prev) => !prev)}
-                  style={styles.sideBlueButton}
-                >
-                  <span>ふりがなを表示</span>
-                  <span>Show Furigana</span>
-                </button>
+                <div style={styles.buttonInfoGroup}>
+                  <button
+                    type="button"
+                    onClick={() => setShowFurigana((prev) => !prev)}
+                    style={styles.sideBlueButton}
+                  >
+                    <span>ふりがなを表示</span>
+                    <span>Show Furigana</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFuriganaHelp((prev) => !prev)}
+                    style={styles.infoButton}
+                  >
+                    ?
+                  </button>
+                </div>
+                <InfoBubble
+                  isOpen={showFuriganaHelp}
+                  text="Show furigana for the other kanji in the sentence, not for the answer part."
+                />
 
                 <button
                   type="button"
@@ -889,7 +1101,16 @@ function KanjiReadingQuizInner() {
               <div style={styles.desktopMain}>
                 <div style={styles.desktopTop}>
                   <div style={styles.numberWrapDesktop}>
-                    <div style={styles.questionNumber}>{questionIndex + 1}</div>
+                    <div
+                      style={{
+                        ...styles.questionNumber,
+                        width: compactQuestionNumberSize,
+                        height: compactQuestionNumberSize,
+                        fontSize: compactQuestionFont,
+                      }}
+                    >
+                      {questionIndex + 1}
+                    </div>
                   </div>
 
                   <div style={styles.promptWrapDesktop}>
@@ -908,6 +1129,7 @@ function KanjiReadingQuizInner() {
                           fontSize: promptFontSize,
                           lineHeight: 1.01,
                           transform: "none",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {renderPrompt(currentQuestion)}
@@ -1045,14 +1267,29 @@ function KanjiReadingQuizInner() {
                   <div style={styles.hintBlockDesktop}>
                     {!showHint ? (
                       <div style={styles.hintButtonWrap}>
-                        <button
-                          type="button"
-                          onClick={() => setShowHint(true)}
-                          style={styles.hintButton}
-                        >
-                          <span style={styles.hintMiniText}>ヒントを見る</span>
-                          <span style={styles.hintMainText}>Hint</span>
-                        </button>
+                        <div style={styles.hintHeadingRow}>
+                          <button
+                            type="button"
+                            onClick={() => setShowHint(true)}
+                            style={styles.hintButton}
+                          >
+                            <span style={styles.hintMiniText}>ヒントを見る</span>
+                            <span style={styles.hintMainText}>Hint</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowHintHelp((prev) => !prev)}
+                            style={styles.infoButton}
+                          >
+                            ?
+                          </button>
+                        </div>
+
+                        <InfoBubble
+                          isOpen={showHintHelp}
+                          text="Parentheses show okurigana, the hiragana part that is often written after the kanji in a word."
+                        />
+
                         <AssetImage
                           src={ASSETS.hand}
                           alt="hand"
@@ -1077,6 +1314,19 @@ function KanjiReadingQuizInner() {
                             objectFit: "contain",
                           }}
                         />
+                        <div style={styles.hintHelpInline}>
+                          <button
+                            type="button"
+                            onClick={() => setShowHintHelp((prev) => !prev)}
+                            style={styles.infoButton}
+                          >
+                            ?
+                          </button>
+                        </div>
+                        <InfoBubble
+                          isOpen={showHintHelp}
+                          text="Parentheses show okurigana, the hiragana part that is often written after the kanji in a word."
+                        />
                         {renderHintPanel(currentQuestion, false)}
                       </div>
                     )}
@@ -1086,15 +1336,30 @@ function KanjiReadingQuizInner() {
             </div>
           ) : (
             <div style={styles.mobileLayout}>
-              <div style={styles.mobileTopRow}>
-                <div style={styles.questionNumber}>{questionIndex + 1}</div>
+              <div
+                style={{
+                  ...styles.mobileTopRow,
+                  alignItems: "flex-start",
+                }}
+              >
+                <div
+                  style={{
+                    ...styles.questionNumber,
+                    width: compactQuestionNumberSize,
+                    height: compactQuestionNumberSize,
+                    fontSize: compactQuestionFont,
+                  }}
+                >
+                  {questionIndex + 1}
+                </div>
+
                 <AssetImage
                   src={ASSETS.character}
                   alt="character"
                   fallback={<span style={{ fontSize: 44 }}>🤔</span>}
                   style={{
-                    width: 98,
-                    height: 98,
+                    width: isTablet ? 110 : 82,
+                    height: isTablet ? 110 : 82,
                     objectFit: "contain",
                   }}
                 />
@@ -1103,30 +1368,55 @@ function KanjiReadingQuizInner() {
               <div
                 style={{
                   ...styles.promptCard,
-                  minHeight: isSmallMobile ? 126 : 144,
-                  padding: isSmallMobile ? "14px 14px" : "16px 18px",
+                  minHeight: isTablet ? 170 : isSmallPhone ? 110 : 126,
+                  padding: isTablet ? "18px 18px" : isSmallPhone ? "12px 12px" : "14px 14px",
                 }}
               >
                 <div
                   style={{
                     ...styles.promptText,
                     fontSize: promptFontSize,
-                    lineHeight: 1.04,
+                    lineHeight: 1.12,
+                    whiteSpace: "normal",
+                    overflowWrap: "anywhere",
+                    wordBreak: "break-word",
+                    width: "100%",
                   }}
                 >
                   {renderPrompt(currentQuestion)}
                 </div>
               </div>
 
-              <div style={styles.mobileButtonsRow}>
-                <button
-                  type="button"
-                  onClick={() => setShowFurigana((prev) => !prev)}
-                  style={styles.sideBlueButtonMobile}
-                >
-                  <span>ふりがなを表示</span>
-                  <span>Show Furigana</span>
-                </button>
+              <div
+                style={{
+                  ...styles.mobileButtonsRow,
+                  gridTemplateColumns: isTablet ? "repeat(2, minmax(0, 260px))" : "1fr 1fr",
+                  justifyContent: "center",
+                }}
+              >
+                <div style={styles.mobileButtonInfoWrap}>
+                  <div style={styles.mobileButtonInfoHeader}>
+                    <button
+                      type="button"
+                      onClick={() => setShowFurigana((prev) => !prev)}
+                      style={styles.sideBlueButtonMobile}
+                    >
+                      <span>ふりがなを表示</span>
+                      <span>Show Furigana</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowFuriganaHelp((prev) => !prev)}
+                      style={styles.infoButton}
+                    >
+                      ?
+                    </button>
+                  </div>
+                  <InfoBubble
+                    isOpen={showFuriganaHelp}
+                    text="Show furigana for the other kanji in the sentence, not for the answer part."
+                  />
+                </div>
 
                 <button
                   type="button"
@@ -1143,7 +1433,7 @@ function KanjiReadingQuizInner() {
                   <div
                     style={{
                       ...styles.translationText,
-                      fontSize: isSmallMobile ? 20 : 22,
+                      fontSize: isTablet ? 24 : isSmallPhone ? 18 : 20,
                     }}
                   >
                     {currentQuestion.translation_en}
@@ -1151,46 +1441,112 @@ function KanjiReadingQuizInner() {
                 ) : null}
               </div>
 
-              {!showHint ? (
-                <button
-                  type="button"
-                  onClick={() => setShowHint(true)}
-                  style={{
-                    ...styles.hintButton,
-                    width: "100%",
-                    minHeight: 76,
-                    marginTop: 2,
-                  }}
-                >
-                  <span style={styles.hintMiniText}>ヒントを見る</span>
-                  <span style={styles.hintMainText}>Hint</span>
-                </button>
-              ) : (
-                <div style={{ marginTop: 4 }}>
-                  <div style={styles.mobileBulb}>
-                    <AssetImage
-                      src={ASSETS.bulb}
-                      alt="bulb"
-                      fallback={<span style={{ fontSize: 56 }}>💡</span>}
-                      style={{
-                        width: 82,
-                        height: 82,
-                        objectFit: "contain",
-                      }}
+              <div
+                style={{
+                  marginTop: isTablet ? 2 : 0,
+                }}
+              >
+                {!showHint ? (
+                  <div style={styles.mobileHintBlock}>
+                    <div style={styles.mobileHintHeader}>
+                      <button
+                        type="button"
+                        onClick={() => setShowHint(true)}
+                        style={{
+                          ...styles.hintButton,
+                          width: "100%",
+                          minHeight: isTablet ? 84 : 74,
+                          boxShadow: isTablet ? "10px 10px 0 #9ec1f0" : "8px 8px 0 #9ec1f0",
+                        }}
+                      >
+                        <span style={styles.hintMiniText}>ヒントを見る</span>
+                        <span
+                          style={{
+                            ...styles.hintMainText,
+                            fontSize: isTablet ? 46 : 34,
+                          }}
+                        >
+                          Hint
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowHintHelp((prev) => !prev)}
+                        style={styles.infoButton}
+                      >
+                        ?
+                      </button>
+                    </div>
+
+                    <InfoBubble
+                      isOpen={showHintHelp}
+                      text="Parentheses show okurigana, the hiragana part that is often written after the kanji in a word."
                     />
                   </div>
-                  {renderHintPanel(currentQuestion, true)}
-                </div>
-              )}
+                ) : (
+                  <div style={{ marginTop: isTablet ? 0 : 2 }}>
+                    <div style={styles.mobileBulbRow}>
+                      <div style={styles.mobileBulb}>
+                        <AssetImage
+                          src={ASSETS.bulb}
+                          alt="bulb"
+                          fallback={<span style={{ fontSize: 56 }}>💡</span>}
+                          style={{
+                            width: isTablet ? 86 : 68,
+                            height: isTablet ? 86 : 68,
+                            objectFit: "contain",
+                          }}
+                        />
+                      </div>
 
-              <div style={styles.inputTitleMobile}>
+                      <button
+                        type="button"
+                        onClick={() => setShowHintHelp((prev) => !prev)}
+                        style={styles.infoButton}
+                      >
+                        ?
+                      </button>
+                    </div>
+
+                    <InfoBubble
+                      isOpen={showHintHelp}
+                      text="Parentheses show okurigana, the hiragana part that is often written after the kanji in a word."
+                    />
+
+                    {renderHintPanel(currentQuestion, true)}
+                  </div>
+                )}
+              </div>
+
+              <div
+                style={{
+                  ...styles.inputTitleMobile,
+                  marginTop: isTablet ? 24 : 18,
+                  fontSize: isTablet ? 24 : 20,
+                }}
+              >
                 読みを入力
                 <br />
                 Type in hiragana
               </div>
 
-              <div style={styles.inputRowMobile}>
-                <div style={styles.arrowMobile}>»»</div>
+              <div
+                style={{
+                  ...styles.inputRowMobile,
+                  gridTemplateColumns: isTablet ? "44px minmax(0, 1fr)" : "40px minmax(0, 1fr)",
+                  gap: isTablet ? 10 : 6,
+                }}
+              >
+                <div
+                  style={{
+                    ...styles.arrowMobile,
+                    fontSize: isTablet ? 34 : 28,
+                  }}
+                >
+                  »»
+                </div>
+
                 <input
                   ref={inputRef}
                   type="text"
@@ -1206,19 +1562,28 @@ function KanjiReadingQuizInner() {
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
-                  style={styles.answerInputMobile}
+                  style={{
+                    ...styles.answerInputMobile,
+                    height: isTablet ? 62 : 56,
+                    fontSize: isTablet ? 28 : 22,
+                  }}
                 />
               </div>
 
               {checked && wasCorrect === true ? (
-                <div style={styles.correctMobile}>
+                <div
+                  style={{
+                    ...styles.correctMobile,
+                    fontSize: isTablet ? 26 : 22,
+                  }}
+                >
                   <AssetImage
                     src={ASSETS.correct}
                     alt="correct"
                     fallback={<span style={{ fontSize: 28 }}>👍</span>}
                     style={{
-                      width: 96,
-                      height: 56,
+                      width: isTablet ? 88 : 74,
+                      height: isTablet ? 52 : 44,
                       objectFit: "contain",
                     }}
                   />
@@ -1234,20 +1599,30 @@ function KanjiReadingQuizInner() {
                       alt="wrong"
                       fallback={<span style={{ fontSize: 26 }}>☹️</span>}
                       style={{
-                        width: 46,
-                        height: 46,
+                        width: isTablet ? 44 : 38,
+                        height: isTablet ? 44 : 38,
                         objectFit: "contain",
                       }}
                     />
                     <div style={styles.wrongBadge}>CORRECT ANSWER</div>
                   </div>
-                  <div style={styles.wrongAnswerMobile}>
+                  <div
+                    style={{
+                      ...styles.wrongAnswerMobile,
+                      fontSize: isTablet ? 28 : 24,
+                    }}
+                  >
                     {currentQuestion.answer_text}
                   </div>
                 </div>
               ) : null}
 
-              <div style={styles.bottomButtonRowMobile}>
+              <div
+                style={{
+                  ...styles.bottomButtonRowMobile,
+                  marginTop: isTablet ? 14 : 12,
+                }}
+              >
                 <button
                   type="button"
                   onClick={handleCheckOrNext}
@@ -1261,6 +1636,8 @@ function KanjiReadingQuizInner() {
                       saving || !getCurrentInputValue().trim()
                         ? "not-allowed"
                         : "pointer",
+                    fontSize: isTablet ? 20 : 16,
+                    padding: isTablet ? "12px 18px" : "10px 14px",
                   }}
                 >
                   {saving ? "Saving..." : checked ? "Next" : "Check"}
@@ -1272,6 +1649,8 @@ function KanjiReadingQuizInner() {
                   style={{
                     ...styles.secondaryButton,
                     width: "100%",
+                    fontSize: isTablet ? 20 : 16,
+                    padding: isTablet ? "12px 18px" : "10px 14px",
                   }}
                 >
                   Restart this unit
@@ -1299,9 +1678,11 @@ const styles: Record<string, React.CSSProperties> = {
     background:
       "repeating-linear-gradient(90deg, #98b9e5 0, #98b9e5 56px, #a8c4ea 56px, #a8c4ea 60px), repeating-linear-gradient(0deg, rgba(255,255,255,0.22) 0, rgba(255,255,255,0.22) 56px, transparent 56px, transparent 60px)",
     overflowX: "hidden",
+    overflowY: "auto",
     color: "#111",
     fontFamily:
       'Arial Rounded MT Bold, Arial, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif',
+    paddingBottom: 18,
   },
   centerWrap: {
     minHeight: "100dvh",
@@ -1345,7 +1726,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 20,
   },
   appFrame: {
-    margin: "20px auto 6px",
+    margin: "10px auto 6px",
     background: "#efefef",
     border: "4px solid #111",
     borderRadius: 28,
@@ -1369,23 +1750,57 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     position: "relative",
     zIndex: 1,
+    gap: 10,
   },
   windowDots: {
     display: "flex",
-    gap: 16,
     alignItems: "center",
   },
   dot: {
-    width: 38,
-    height: 38,
     borderRadius: "50%",
     border: "4px solid #111",
     display: "inline-block",
+    flexShrink: 0,
   },
   windowTitle: {
     fontWeight: 900,
     color: "#244988",
     letterSpacing: 0.5,
+    lineHeight: 1.05,
+  },
+  menuWrapInline: {
+    position: "relative",
+    flexShrink: 0,
+  },
+  menuButton: {
+    border: "3px solid #111",
+    borderRadius: 999,
+    background: "#fff",
+    color: "#111",
+    fontWeight: 900,
+    cursor: "pointer",
+    lineHeight: 1,
+  },
+  menuDropdown: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    background: "#fff",
+    borderRadius: 18,
+    boxShadow: "0 16px 34px rgba(0,0,0,0.14)",
+    overflow: "hidden",
+    zIndex: 30,
+  },
+  menuItem: {
+    width: "100%",
+    border: "none",
+    background: "#fff",
+    color: "#111",
+    fontWeight: 800,
+    textAlign: "left",
+    cursor: "pointer",
+    borderBottom: "1px solid #ececec",
+    padding: "12px 14px",
+    fontSize: 14,
   },
   contentOuter: {
     position: "relative",
@@ -1395,7 +1810,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    gap: 16,
+    gap: 12,
   },
   sparkle: {
     color: "#8fb4ea",
@@ -1408,7 +1823,6 @@ const styles: Record<string, React.CSSProperties> = {
     textShadow:
       "-2px 0 #244988, 0 2px #244988, 2px 0 #244988, 0 -2px #244988",
     letterSpacing: 1,
-    lineHeight: 1.03,
   },
   smallTitle: {
     fontWeight: 900,
@@ -1445,7 +1859,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "flex-start",
     paddingTop: 18,
-    transform: "translateX(-60px)",
+    transform: "translateX(-42px)",
   },
   promptWrapDesktop: {
     minWidth: 0,
@@ -1471,7 +1885,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     justifyContent: "flex-start",
     paddingTop: "0px",
-    transform: "translateY(-18px)",
+    transform: "translateY(-8px)",
   },
   hintBlockDesktop: {
     minWidth: 0,
@@ -1487,18 +1901,37 @@ const styles: Record<string, React.CSSProperties> = {
   mobileTopRow: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center",
+    gap: 10,
   },
   mobileButtonsRow: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
     gap: 10,
   },
   translationRowMobile: {
-    minHeight: 30,
+    minHeight: 26,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+  },
+  buttonInfoGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  buttonInfoGroupColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  mobileButtonInfoWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  mobileButtonInfoHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
   },
   sideBlueButton: {
     border: "4px solid #111",
@@ -1516,6 +1949,7 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.08,
     minHeight: 68,
     justifyContent: "center",
+    flex: 1,
   },
   sidePinkButton: {
     border: "4px solid #111",
@@ -1541,15 +1975,16 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fff",
     fontWeight: 900,
     cursor: "pointer",
-    padding: "10px 8px",
+    padding: "8px 8px",
     boxShadow: "0 5px 0 rgba(0,0,0,0.15)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    fontSize: 14,
-    lineHeight: 1.1,
-    minHeight: 72,
+    fontSize: 13,
+    lineHeight: 1.08,
+    minHeight: 64,
     justifyContent: "center",
+    flex: 1,
   },
   sidePinkButtonMobile: {
     border: "4px solid #111",
@@ -1558,24 +1993,47 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fff",
     fontWeight: 900,
     cursor: "pointer",
-    padding: "10px 8px",
+    padding: "8px 8px",
     boxShadow: "0 5px 0 rgba(0,0,0,0.15)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    fontSize: 14,
-    lineHeight: 1.1,
-    minHeight: 72,
+    fontSize: 13,
+    lineHeight: 1.08,
+    minHeight: 64,
     justifyContent: "center",
   },
+  infoButton: {
+    width: 30,
+    height: 30,
+    borderRadius: "50%",
+    border: "3px solid #111",
+    background: "#fff",
+    color: "#111",
+    fontWeight: 900,
+    cursor: "pointer",
+    flexShrink: 0,
+    fontSize: 16,
+    lineHeight: 1,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  infoBubble: {
+    background: "#fff",
+    border: "3px solid #111",
+    borderRadius: 14,
+    padding: "10px 12px",
+    fontSize: 12,
+    fontWeight: 700,
+    lineHeight: 1.4,
+    boxShadow: "0 6px 0 rgba(0,0,0,0.1)",
+  },
   questionNumber: {
-    width: 88,
-    height: 88,
     borderRadius: "50%",
     background: "#f2a0a7",
     color: "#fff",
     fontWeight: 900,
-    fontSize: 48,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1596,12 +2054,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     color: "#244988",
     letterSpacing: 0.1,
-    whiteSpace: "nowrap",
   },
   rubyWord: {
     position: "relative",
     display: "inline-block",
-    paddingTop: "0.3em",
+    paddingTop: "0.32em",
     lineHeight: 1,
   },
   rubyText: {
@@ -1621,7 +2078,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "inline-flex",
     flexDirection: "column",
     alignItems: "center",
-    paddingBottom: 12,
+    paddingBottom: 10,
     margin: "0 2px",
   },
   targetUnderline: {
@@ -1636,8 +2093,7 @@ const styles: Record<string, React.CSSProperties> = {
   translationText: {
     textAlign: "center",
     fontWeight: 900,
-    lineHeight: 1.08,
-    fontSize: 23,
+    lineHeight: 1.15,
   },
   characterWrap: {
     display: "flex",
@@ -1658,8 +2114,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     textAlign: "center",
     lineHeight: 1.08,
-    fontSize: 20,
-    marginTop: 2,
   },
   inputRowDesktop: {
     display: "grid",
@@ -1669,8 +2123,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   inputRowMobile: {
     display: "grid",
-    gridTemplateColumns: "54px minmax(0, 1fr)",
-    gap: 8,
     alignItems: "center",
   },
   arrowDesktop: {
@@ -1680,7 +2132,6 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
   arrowMobile: {
-    fontSize: 40,
     fontWeight: 900,
     lineHeight: 1,
     textAlign: "center",
@@ -1700,14 +2151,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   answerInputMobile: {
     width: "100%",
-    height: 68,
-    border: "8px solid #111",
-    borderRadius: 22,
+    border: "6px solid #111",
+    borderRadius: 20,
     background: "#fff",
     padding: "0 14px",
     outline: "none",
     fontWeight: 900,
-    fontSize: 26,
     color: "#111",
     boxSizing: "border-box",
   },
@@ -1740,6 +2189,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     gap: 8,
     marginBottom: 6,
+    flexWrap: "wrap",
   },
   wrongAnswerDesktop: {
     color: "#e50000",
@@ -1753,7 +2203,6 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
-    fontSize: 30,
     fontWeight: 900,
   },
   wrongMobile: {
@@ -1764,7 +2213,6 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 4,
     color: "#e50000",
     fontWeight: 900,
-    fontSize: 34,
     lineHeight: 1.05,
   },
   wrongBadge: {
@@ -1779,11 +2227,26 @@ const styles: Record<string, React.CSSProperties> = {
   hintButtonWrap: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
+    alignItems: "stretch",
     justifyContent: "flex-start",
     width: "100%",
-    gap: 4,
-    transform: "translateY(-10px)",
+    gap: 8,
+    transform: "translateY(-6px)",
+  },
+  hintHeadingRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  mobileHintBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  mobileHintHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
   },
   hintButton: {
     border: "none",
@@ -1799,13 +2262,13 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     minHeight: 78,
     padding: "8px 16px",
+    flex: 1,
   },
   hintMiniText: {
     fontSize: 16,
     lineHeight: 1.05,
   },
   hintMainText: {
-    fontSize: 38,
     fontWeight: 900,
     lineHeight: 1,
   },
@@ -1818,7 +2281,7 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
     paddingTop: 18,
     width: "100%",
-    transform: "translateY(-34px)",
+    transform: "translateY(-14px)",
   },
   bulbDesktop: {
     position: "absolute",
@@ -1827,14 +2290,26 @@ const styles: Record<string, React.CSSProperties> = {
     transform: "translateX(-50%)",
     zIndex: 2,
   },
+  mobileBulbRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 2,
+  },
   mobileBulb: {
     textAlign: "center",
     lineHeight: 1,
-    marginBottom: -8,
     position: "relative",
     zIndex: 2,
     display: "flex",
     justifyContent: "center",
+  },
+  hintHelpInline: {
+    position: "absolute",
+    top: -6,
+    right: 10,
+    zIndex: 3,
   },
   hintPanel: {
     position: "relative",
@@ -1931,7 +2406,6 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 10,
-    marginTop: 12,
   },
   primaryButton: {
     border: "none",

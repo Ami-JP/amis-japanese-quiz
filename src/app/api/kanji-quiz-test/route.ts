@@ -409,12 +409,8 @@ export async function GET(request: NextRequest) {
         | "practice-unit") ?? "normal";
 
     const requestedUnit = normalizeText(request.nextUrl.searchParams.get("unit"));
-    const startOrderParam = Number(
-      request.nextUrl.searchParams.get("startOrder") ?? 0
-    );
-    const endOrderParam = Number(
-      request.nextUrl.searchParams.get("endOrder") ?? 0
-    );
+    const startOrderParam = Number(request.nextUrl.searchParams.get("startOrder") ?? 0);
+    const endOrderParam = Number(request.nextUrl.searchParams.get("endOrder") ?? 0);
 
     const { account, errorResponse } = await getLoggedInAccount(db);
     if (!account) {
@@ -432,10 +428,7 @@ export async function GET(request: NextRequest) {
         .order("answered_at", { ascending: false });
 
       if (attemptsError) {
-        return NextResponse.json(
-          { error: attemptsError.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: attemptsError.message }, { status: 400 });
       }
 
       const attempts = (attemptsRaw ?? []) as AttemptHistoryRow[];
@@ -536,19 +529,13 @@ export async function GET(request: NextRequest) {
       const startOrder = startOrderParam > 0 ? startOrderParam : 1;
 
       if (!unit) {
-        return NextResponse.json(
-          { error: "unit is required." },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "unit is required." }, { status: 400 });
       }
 
       const unitPool = await fetchKanjiPool(db, unit);
 
       const orderedRows = unitPool
-        .filter(
-          (row) =>
-            row.order_in_unit !== null && row.order_in_unit >= startOrder
-        )
+        .filter((row) => row.order_in_unit !== null && row.order_in_unit >= startOrder)
         .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
         .slice(0, QUESTION_LIMIT);
 
@@ -574,10 +561,7 @@ export async function GET(request: NextRequest) {
     let activeUnit = requestedUnit || account.current_unit;
 
     if (!activeUnit) {
-      return NextResponse.json(
-        { error: "current_unit is empty." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "current_unit is empty." }, { status: 400 });
     }
 
     let activePool = await fetchKanjiPool(db, activeUnit);
@@ -585,13 +569,18 @@ export async function GET(request: NextRequest) {
     let activeLastOrderCompleted = progress?.last_order_completed ?? 0;
 
     let orderedRows = activePool
-      .filter(
-        (row) =>
-          row.order_in_unit !== null &&
-          row.order_in_unit > activeLastOrderCompleted
-      )
+      .filter((row) => row.order_in_unit !== null && row.order_in_unit > activeLastOrderCompleted)
       .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
       .slice(0, QUESTION_LIMIT);
+
+    if (orderedRows.length === 0 && lockedToUnit) {
+      orderedRows = activePool
+        .filter((row) => row.order_in_unit !== null)
+        .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
+        .slice(0, QUESTION_LIMIT);
+
+      activeLastOrderCompleted = 0;
+    }
 
     if (orderedRows.length === 0 && !lockedToUnit) {
       const { data: nextUnitRowRaw, error: nextUnitError } = await db
@@ -604,10 +593,7 @@ export async function GET(request: NextRequest) {
         .maybeSingle();
 
       if (nextUnitError) {
-        return NextResponse.json(
-          { error: nextUnitError.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: nextUnitError.message }, { status: 400 });
       }
 
       const nextUnitRow = nextUnitRowRaw as { unit: string | null } | null;
@@ -690,8 +676,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     const unit = typeof body.unit === "string" ? body.unit : "";
-    const advanceCount =
-      typeof body.advanceCount === "number" ? body.advanceCount : 0;
+    const advanceCount = typeof body.advanceCount === "number" ? body.advanceCount : 0;
     const mode =
       (body.mode as
         | "normal"
@@ -725,23 +710,16 @@ export async function POST(request: NextRequest) {
       const { error: insertError } = await db.from("kanji_attempts").insert(rows);
 
       if (insertError) {
-        return NextResponse.json(
-          { error: insertError.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: insertError.message }, { status: 400 });
       }
     }
 
     if (mode === "normal") {
       if (!unit) {
-        return NextResponse.json(
-          { error: "unit is required." },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "unit is required." }, { status: 400 });
       }
 
       const progress = await getCurrentProgress(db, account.id, unit);
-
       const newLastOrderCompleted =
         (progress?.last_order_completed ?? 0) + advanceCount;
 
@@ -758,10 +736,7 @@ export async function POST(request: NextRequest) {
         .upsert(progressRow);
 
       if (upsertError) {
-        return NextResponse.json(
-          { error: upsertError.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: upsertError.message }, { status: 400 });
       }
 
       const { error: updateCurrentUnitError } = await db

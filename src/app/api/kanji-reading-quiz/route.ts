@@ -443,7 +443,6 @@ function chooseOneReadingPerKanji(
 
   for (const row of pool) {
     const kanjiOrder = normalizeNumber(row.kanji_order_in_unit);
-
     if (kanjiOrder == null) continue;
 
     const current = groups.get(kanjiOrder) ?? [];
@@ -452,7 +451,6 @@ function chooseOneReadingPerKanji(
   }
 
   const selected: ReadingQuestionRow[] = [];
-
   const sortedGroups = Array.from(groups.entries()).sort((a, b) => a[0] - b[0]);
 
   for (const [, rows] of sortedGroups) {
@@ -487,8 +485,10 @@ function chooseOneReadingPerKanji(
 
       if (aVariant !== bVariant) return aVariant - bVariant;
 
-      return (normalizeNumber(a.order_in_unit) ?? 999999) -
-        (normalizeNumber(b.order_in_unit) ?? 999999);
+      return (
+        (normalizeNumber(a.order_in_unit) ?? 999999) -
+        (normalizeNumber(b.order_in_unit) ?? 999999)
+      );
     });
 
     if (sorted[0]) {
@@ -509,17 +509,9 @@ function hasMoreUnreadReadings(
   return pool.some((row) => {
     const id = questionIdKey(row.id);
     if (!id) return false;
+    if (selectedIds.has(id)) return false;
 
-    const history = historyMap[id];
-    const alreadyShown = (history?.shown_count ?? 0) > 0;
-
-    if (!alreadyShown) return true;
-
-    if (selectedIds.has(id) && (history?.shown_count ?? 0) === 0) {
-      return true;
-    }
-
-    return false;
+    return (historyMap[id]?.shown_count ?? 0) === 0;
   });
 }
 
@@ -529,10 +521,7 @@ async function fetchKanjiHintMap(
 ): Promise<Record<string, any>> {
   if (keys.length === 0) return {};
 
-  const { data, error } = await db
-    .from("kanji_hints")
-    .select("*")
-    .in("kanji", keys);
+  const { data, error } = await db.from("kanji_hints").select("*").in("kanji", keys);
 
   if (error) {
     throw new Error(error.message);
@@ -562,12 +551,7 @@ async function fetchKanjiHintMap(
         "kun_reading",
         "reading_kun",
       ]),
-      ruby: pickString(row, [
-        "ruby",
-        "reading_hiragana",
-        "reading",
-        "target_ruby",
-      ]),
+      ruby: pickString(row, ["ruby", "reading_hiragana", "reading", "target_ruby"]),
     };
 
     return acc;
@@ -736,42 +720,26 @@ export async function GET(request: NextRequest) {
     const difficultyTier = normalizeDifficultyTier(
       request.nextUrl.searchParams.get("tier")
     );
-    const mode =
-      normalizeText(request.nextUrl.searchParams.get("mode")) || "normal";
+    const mode = normalizeText(request.nextUrl.searchParams.get("mode")) || "normal";
 
-    const startOrder = normalizeNumber(
-      request.nextUrl.searchParams.get("startOrder")
-    );
+    const startOrder = normalizeNumber(request.nextUrl.searchParams.get("startOrder"));
     const endOrder = normalizeNumber(request.nextUrl.searchParams.get("endOrder"));
 
     if (!unit) {
-      return NextResponse.json(
-        { error: "unit is required." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "unit is required." }, { status: 400 });
     }
 
     const pool = await fetchQuestionPool(db, unit, difficultyTier);
 
     if (mode === "practice-set") {
       const practiceSetPool = filterPracticeSetPool(pool, startOrder, endOrder);
-      const questionIds = practiceSetPool
-        .map((row) => questionIdKey(row.id))
-        .filter(Boolean);
+      const questionIds = practiceSetPool.map((row) => questionIdKey(row.id)).filter(Boolean);
 
-      const historyMap = await fetchReadingHistoryMap(
-        db,
-        account.id,
-        questionIds
-      );
-
+      const historyMap = await fetchReadingHistoryMap(db, account.id, questionIds);
       const selectedRows = chooseOneReadingPerKanji(practiceSetPool, historyMap);
       const hintMap = await buildHintMapForRows(db, selectedRows);
 
-      const questions = selectedRows.map((row) =>
-        buildQuestionResponse(row, hintMap)
-      );
-
+      const questions = selectedRows.map((row) => buildQuestionResponse(row, hintMap));
       const hasMoreReadingVariants = hasMoreUnreadReadings(
         practiceSetPool,
         historyMap,
@@ -819,21 +787,21 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const progress = await getReadingProgress(
-      db,
-      account.id,
-      unit,
-      difficultyTier
-    );
+    const progress = await getReadingProgress(db, account.id, unit, difficultyTier);
     const lastOrderCompleted = progress?.last_order_completed ?? 0;
 
-    const questions = pool
-      .filter(
-        (row) =>
-          row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted
-      )
-      .slice(0, QUESTION_LIMIT)
-      .map((row) => buildQuestionResponse(row, hintMap));
+    let orderedRows = pool
+      .filter((row) => row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted)
+      .slice(0, QUESTION_LIMIT);
+
+    if (orderedRows.length === 0 && pool.length > 0) {
+      orderedRows = pool
+        .filter((row) => row.order_in_unit !== null)
+        .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
+        .slice(0, QUESTION_LIMIT);
+    }
+
+    const questions = orderedRows.map((row) => buildQuestionResponse(row, hintMap));
 
     return NextResponse.json({
       account: {
@@ -870,17 +838,11 @@ export async function POST(request: NextRequest) {
     const unit = normalizeText(body.unit);
     const difficultyTier = normalizeDifficultyTier(body.difficulty_tier);
     const mode = normalizeText(body.mode) || "normal";
-    const attempts = Array.isArray(body.attempts)
-      ? (body.attempts as AttemptRow[])
-      : [];
-    const advanceCount =
-      typeof body.advanceCount === "number" ? body.advanceCount : 0;
+    const attempts = Array.isArray(body.attempts) ? (body.attempts as AttemptRow[]) : [];
+    const advanceCount = typeof body.advanceCount === "number" ? body.advanceCount : 0;
 
     if (!unit) {
-      return NextResponse.json(
-        { error: "unit is required." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "unit is required." }, { status: 400 });
     }
 
     if (attempts.length > 0) {
@@ -901,22 +863,14 @@ export async function POST(request: NextRequest) {
       const { error: insertError } = await db.from("kanji_attempts").insert(rows);
 
       if (insertError) {
-        return NextResponse.json(
-          { error: insertError.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: insertError.message }, { status: 400 });
       }
 
       await updateReadingQuestionHistory(db, account.id, unit, attempts);
     }
 
     if (mode === "normal" && advanceCount > 0) {
-      const current = await getReadingProgress(
-        db,
-        account.id,
-        unit,
-        difficultyTier
-      );
+      const current = await getReadingProgress(db, account.id, unit, difficultyTier);
 
       const newLastOrderCompleted =
         (current?.last_order_completed ?? 0) + advanceCount;
@@ -936,10 +890,7 @@ export async function POST(request: NextRequest) {
         .upsert(progressRow);
 
       if (upsertError) {
-        return NextResponse.json(
-          { error: upsertError.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: upsertError.message }, { status: 400 });
       }
 
       const pool = await fetchQuestionPool(db, unit, difficultyTier);
@@ -956,10 +907,7 @@ export async function POST(request: NextRequest) {
           });
 
         if (completeError) {
-          return NextResponse.json(
-            { error: completeError.message },
-            { status: 400 }
-          );
+          return NextResponse.json({ error: completeError.message }, { status: 400 });
         }
       }
     }
