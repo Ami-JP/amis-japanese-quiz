@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type HintKanjiItem = {
@@ -180,7 +180,7 @@ function splitReadingsToLines(value: string) {
     .filter(Boolean);
 }
 
-export default function KanjiReadingQuizPage() {
+function KanjiReadingQuizInner() {
   const searchParams = useSearchParams();
   const unit = (searchParams.get("unit") ?? "").trim();
   const difficultyTier = (searchParams.get("tier") ?? "normal").trim();
@@ -542,15 +542,6 @@ export default function KanjiReadingQuizPage() {
 
   function goToMeaningQuiz() {
     if (!batch) return;
-
-    if (batch.mode === "practice-set" && batch.startOrder && batch.endOrder) {
-      window.location.href = `/kanji-quiz-test?unit=${encodeURIComponent(
-        batch.unit
-      )}&tier=${encodeURIComponent(
-        batch.difficulty_tier
-      )}&mode=normal&startOrder=${batch.startOrder}&endOrder=${batch.endOrder}`;
-      return;
-    }
 
     window.location.href = `/kanji-quiz-test?unit=${encodeURIComponent(
       batch.unit
@@ -1294,6 +1285,14 @@ export default function KanjiReadingQuizPage() {
   );
 }
 
+export default function KanjiReadingQuizPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading...</div>}>
+      <KanjiReadingQuizInner />
+    </Suspense>
+  );
+}
+
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100dvh",
@@ -1633,15 +1632,6 @@ const styles: Record<string, React.CSSProperties> = {
     height: 10,
     background: "#38a0d8",
     borderRadius: 999,
-  },
-  inlineRuby: {
-    display: "inline-block",
-  },
-  inlineRt: {
-    fontSize: "0.24em",
-    fontWeight: 900,
-    color: "#244988",
-    lineHeight: 1,
   },
   translationText: {
     textAlign: "center",

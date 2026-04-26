@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type QuizOption = {
@@ -53,7 +53,7 @@ type PracticeTarget = {
   endOrder?: number;
 };
 
-export default function KanjiQuizTestPage() {
+function KanjiQuizTestInner() {
   const searchParams = useSearchParams();
   const requestedUnit = (searchParams.get("unit") ?? "").trim();
 
@@ -1151,6 +1151,14 @@ export default function KanjiQuizTestPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function KanjiQuizTestPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading...</div>}>
+      <KanjiQuizTestInner />
+    </Suspense>
   );
 }
 
