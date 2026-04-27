@@ -74,7 +74,6 @@ function KanjiQuizTestInner() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [quizMode, setQuizMode] = useState<QuizMode>("normal");
   const [showSetComplete, setShowSetComplete] = useState(false);
-  const [showFinishMessage, setShowFinishMessage] = useState(false);
   const [lastSetCorrectCount, setLastSetCorrectCount] = useState(0);
   const [lastSetWrongCount, setLastSetWrongCount] = useState(0);
   const [lastCompletedSet, setLastCompletedSet] = useState<PracticeTarget | null>(
@@ -98,6 +97,7 @@ function KanjiQuizTestInner() {
 
   const isMobile = windowWidth <= 768;
   const isSmallMobile = windowWidth <= 430;
+  const isTablet = windowWidth > 768 && windowWidth <= 1180;
 
   function getPracticeTargetFromBatch(currentBatch: BatchResponse | null) {
     if (!currentBatch || currentBatch.questions.length === 0) return null;
@@ -115,23 +115,10 @@ function KanjiQuizTestInner() {
     };
   }
 
-  async function loadBatch(
+  async function fetchBatchOnce(
     mode: QuizMode = "normal",
     practiceTarget?: PracticeTarget | null
   ) {
-    setLoading(true);
-    setError("");
-    setSelected("");
-    setChecked(false);
-    setWasCorrect(null);
-    setMainIndex(0);
-    setReviewQueue([]);
-    setPhase("main");
-    setAttempts([]);
-    setQuizMode(mode);
-    setShowSetComplete(false);
-    setShowFinishMessage(false);
-
     const params = new URLSearchParams();
     params.set("mode", mode);
 
@@ -157,20 +144,64 @@ function KanjiQuizTestInner() {
 
     if (res.status === 401) {
       window.location.href = "/student-login";
-      return;
+      return null;
     }
 
     const data = await res.json();
 
     if (!res.ok) {
-      setError(data.error ?? "Failed to load quiz.");
-      setBatch(null);
-      setLoading(false);
-      return;
+      throw new Error(data.error ?? "Failed to load quiz.");
     }
 
-    setBatch(data);
-    setLoading(false);
+    return data as BatchResponse;
+  }
+
+  async function loadBatch(
+    mode: QuizMode = "normal",
+    practiceTarget?: PracticeTarget | null
+  ) {
+    setLoading(true);
+    setError("");
+    setSelected("");
+    setChecked(false);
+    setWasCorrect(null);
+    setMainIndex(0);
+    setReviewQueue([]);
+    setPhase("main");
+    setAttempts([]);
+    setQuizMode(mode);
+    setShowSetComplete(false);
+
+    try {
+      let data = await fetchBatchOnce(mode, practiceTarget);
+      if (!data) return;
+
+      // unit指定の通常開始で questions が空なら、
+      // 学習者目線では「続きがない」より「そのunitの最初から」の方が自然なので
+      // 自動で先頭から再開する
+      if (
+        mode === "normal" &&
+        requestedUnit &&
+        (!data.questions || data.questions.length === 0)
+      ) {
+        const fallback = await fetchBatchOnce("practice-unit", {
+          unit: requestedUnit,
+          startOrder: 1,
+        });
+
+        if (fallback) {
+          data = fallback;
+          setQuizMode("practice-unit");
+        }
+      }
+
+      setBatch(data);
+    } catch (err) {
+      setBatch(null);
+      setError(err instanceof Error ? err.message : "Failed to load quiz.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -387,6 +418,11 @@ function KanjiQuizTestInner() {
     await loadBatch(mode);
   }
 
+  async function handleContinueCurrentUnit() {
+    setMenuOpen(false);
+    await loadBatch("normal");
+  }
+
   async function handleDoFiveMore() {
     if (quizMode === "practice-unit" && lastCompletedSet?.endOrder) {
       await loadBatch("practice-unit", {
@@ -441,9 +477,15 @@ function KanjiQuizTestInner() {
 
     let optionStyle: React.CSSProperties = {
       ...styles.optionButton,
-      fontSize: isMobile ? (isSmallMobile ? 13 : 15) : 24,
-      padding: isMobile ? (isSmallMobile ? "12px 12px" : "14px 14px") : "18px 22px",
-      minHeight: isMobile ? (isSmallMobile ? 72 : 78) : 82,
+      fontSize: isMobile ? (isSmallMobile ? 13 : 15) : isTablet ? 20 : 24,
+      padding: isMobile
+        ? isSmallMobile
+          ? "12px 12px"
+          : "14px 14px"
+        : isTablet
+        ? "16px 18px"
+        : "18px 22px",
+      minHeight: isMobile ? (isSmallMobile ? 72 : 78) : isTablet ? 76 : 82,
       borderRadius: isMobile ? 20 : 26,
       gap: isMobile ? 6 : 8,
     };
@@ -487,7 +529,7 @@ function KanjiQuizTestInner() {
               onClick={handleContinueRequestedUnit}
               style={styles.emptyPrimaryButton}
             >
-              Continue
+              Continue this unit
             </button>
 
             <button
@@ -548,6 +590,13 @@ function KanjiQuizTestInner() {
       };
     }
 
+    if (requestedUnit) {
+      return {
+        title: "You finished this unit",
+        message: "You can start this unit again or go back home.",
+      };
+    }
+
     return {
       title: "No questions available",
       message: "Please wait a moment, or go back to the quiz.",
@@ -589,7 +638,7 @@ function KanjiQuizTestInner() {
                 onClick={handleContinueRequestedUnit}
                 style={styles.emptyPrimaryButton}
               >
-                Continue
+                Continue this unit
               </button>
 
               <button
@@ -627,52 +676,6 @@ function KanjiQuizTestInner() {
             <h2 style={styles.emptyTitle}>Something went wrong</h2>
             <p style={styles.emptyText}>{error}</p>
             {renderActionButtons()}
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  if (showFinishMessage) {
-    return (
-      <main style={styles.page}>
-        <div style={styles.centerWrap}>
-          <div
-            style={{
-              ...styles.finishCard,
-              width: isMobile ? "92%" : undefined,
-              padding: isMobile ? "26px 20px" : "34px 30px",
-            }}
-          >
-            <h2
-              style={{
-                ...styles.finishTitle,
-                fontSize: isMobile ? 28 : 34,
-              }}
-            >
-              Great work today!
-            </h2>
-            <p
-              style={{
-                ...styles.finishText,
-                fontSize: isMobile ? 16 : 20,
-              }}
-            >
-              You can stop here and come back anytime.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                window.location.href = "/student-home";
-              }}
-              style={{
-                ...styles.finishButton,
-                fontSize: isMobile ? 16 : 18,
-                padding: isMobile ? "12px 20px" : "14px 26px",
-              }}
-            >
-              Back to Home
-            </button>
           </div>
         </div>
       </main>
@@ -777,7 +780,7 @@ function KanjiQuizTestInner() {
                 marginTop: 16,
               }}
             >
-              Continue 5 more
+              Next 5 kanji
             </button>
 
             {(requestedUnit || batch?.unit) ? (
@@ -830,13 +833,21 @@ function KanjiQuizTestInner() {
       <div
         style={{
           ...styles.appFrame,
-          gridTemplateRows: isMobile ? "150px minmax(0, 1fr)" : "170px minmax(0, 1fr)",
+          gridTemplateRows: isMobile
+            ? "138px minmax(0, 1fr)"
+            : isTablet
+            ? "150px minmax(0, 1fr)"
+            : "162px minmax(0, 1fr)",
         }}
       >
         <div
           style={{
             ...styles.topArea,
-            padding: isMobile ? "12px 12px 34px" : "14px 18px 52px",
+            padding: isMobile
+              ? "10px 12px 26px"
+              : isTablet
+              ? "12px 16px 34px"
+              : "12px 18px 42px",
           }}
         >
           <div style={styles.topInner}>
@@ -844,7 +855,7 @@ function KanjiQuizTestInner() {
               style={{
                 ...styles.metaRow,
                 gap: isMobile ? 8 : 16,
-                marginBottom: isMobile ? 6 : 8,
+                marginBottom: isMobile ? 4 : 6,
                 alignItems: "center",
               }}
             >
@@ -852,7 +863,7 @@ function KanjiQuizTestInner() {
                 <div
                   style={{
                     ...styles.metaLabel,
-                    fontSize: isMobile ? 12 : 16,
+                    fontSize: isMobile ? 12 : 15,
                   }}
                 >
                   Unit
@@ -890,19 +901,17 @@ function KanjiQuizTestInner() {
                       right: 0,
                     }}
                   >
-                    {requestedUnit ? (
-                      <button
-                        type="button"
-                        style={{
-                          ...styles.menuItem,
-                          fontSize: isMobile ? 14 : 16,
-                          padding: isMobile ? "12px 14px" : "14px 16px",
-                        }}
-                        onClick={handleContinueRequestedUnit}
-                      >
-                        Continue
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.menuItem,
+                        fontSize: isMobile ? 14 : 16,
+                        padding: isMobile ? "12px 14px" : "14px 16px",
+                      }}
+                      onClick={requestedUnit ? handleContinueRequestedUnit : handleContinueCurrentUnit}
+                    >
+                      Continue this unit
+                    </button>
 
                     {(requestedUnit || batch.unit) ? (
                       <button
@@ -963,7 +972,7 @@ function KanjiQuizTestInner() {
                 <div
                   style={{
                     ...styles.metaLabel,
-                    fontSize: isMobile ? 12 : 16,
+                    fontSize: isMobile ? 12 : 15,
                   }}
                 >
                   {phase === "main" ? "Set progress" : "Review"}
@@ -982,14 +991,15 @@ function KanjiQuizTestInner() {
             <h1
               style={{
                 ...styles.title,
-                fontSize: isMobile ? (isSmallMobile ? 16 : 18) : 34,
-                lineHeight: isMobile ? 1.15 : 1.08,
-                maxWidth: 900,
+                fontSize: isMobile ? 16 : isTablet ? 22 : 30,
+                lineHeight: 1.08,
+                maxWidth: 980,
                 marginLeft: "auto",
                 marginRight: "auto",
+                whiteSpace: isTablet ? "nowrap" : undefined,
               }}
             >
-              Which of the following is closest in meaning to this kanji?
+              Which meaning is closest to this kanji?
             </h1>
           </div>
         </div>
@@ -997,34 +1007,70 @@ function KanjiQuizTestInner() {
         <div
           style={{
             ...styles.gridArea,
-            marginTop: isMobile ? -12 : -26,
-            padding: isMobile ? "0 10px 10px" : "0 16px 14px",
+            marginTop: isMobile ? -10 : isTablet ? -16 : -22,
+            padding: isMobile
+              ? "0 10px 10px"
+              : isTablet
+              ? "0 14px 14px"
+              : "0 16px 14px",
           }}
         >
           <div style={styles.contentWrap}>
             <div
               style={{
                 ...styles.stickyShadow,
-                width: isMobile ? (isSmallMobile ? 118 : 132) : "min(240px, 38vw)",
-                height: isMobile ? (isSmallMobile ? 118 : 132) : "min(240px, 38vw)",
+                width: isMobile
+                  ? isSmallMobile
+                    ? 112
+                    : 126
+                  : isTablet
+                  ? 180
+                  : "min(220px, 34vw)",
+                height: isMobile
+                  ? isSmallMobile
+                    ? 112
+                    : 126
+                  : isTablet
+                  ? 180
+                  : "min(220px, 34vw)",
                 transform: isMobile ? "translate(6px, 6px)" : "translate(10px, 10px)",
               }}
             />
             <div
               style={{
                 ...styles.stickyNote,
-                width: isMobile ? (isSmallMobile ? 118 : 132) : "min(240px, 38vw)",
-                height: isMobile ? (isSmallMobile ? 118 : 132) : "min(240px, 38vw)",
+                width: isMobile
+                  ? isSmallMobile
+                    ? 112
+                    : 126
+                  : isTablet
+                  ? 180
+                  : "min(220px, 34vw)",
+                height: isMobile
+                  ? isSmallMobile
+                    ? 112
+                    : 126
+                  : isTablet
+                  ? 180
+                  : "min(220px, 34vw)",
                 margin: isMobile
-                  ? `${isSmallMobile ? -118 : -132}px auto 10px`
-                  : "-240px auto 14px",
+                  ? `${isSmallMobile ? -112 : -126}px auto 10px`
+                  : isTablet
+                  ? "-180px auto 12px"
+                  : "-220px auto 14px",
               }}
             >
               <div style={styles.stickyFold} />
               <div
                 style={{
                   ...styles.kanji,
-                  fontSize: isMobile ? (isSmallMobile ? 64 : 72) : 150,
+                  fontSize: isMobile
+                    ? isSmallMobile
+                      ? 62
+                      : 70
+                    : isTablet
+                    ? 110
+                    : 144,
                 }}
               >
                 {currentQuestion.kanji}
@@ -1035,7 +1081,7 @@ function KanjiQuizTestInner() {
               style={{
                 ...styles.optionsGrid,
                 gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                gap: isMobile ? 10 : 16,
+                gap: isMobile ? 10 : isTablet ? 14 : 16,
               }}
             >
               {currentQuestion.options.map((option, index) => (
@@ -1051,7 +1097,13 @@ function KanjiQuizTestInner() {
                   <span
                     style={{
                       ...styles.optionIndex,
-                      fontSize: isMobile ? (isSmallMobile ? 12 : 14) : 22,
+                      fontSize: isMobile
+                        ? isSmallMobile
+                          ? 12
+                          : 14
+                        : isTablet
+                        ? 18
+                        : 22,
                     }}
                   >
                     {["①", "②", "③", "④"][index]}
@@ -1080,17 +1132,29 @@ function KanjiQuizTestInner() {
                 <p
                   style={{
                     ...styles.feedbackText,
-                    fontSize: isMobile ? (isSmallMobile ? 12 : 13) : 22,
+                    fontSize: isMobile
+                      ? isSmallMobile
+                        ? 12
+                        : 13
+                      : isTablet
+                      ? 18
+                      : 22,
                   }}
                 >
-                  Choose one answer, then press “Next” to check if it is correct.
+                  Choose one answer, then press “Next” to check it.
                 </p>
               ) : wasCorrect ? (
                 <p
                   style={{
                     ...styles.feedbackText,
                     color: "#138a36",
-                    fontSize: isMobile ? (isSmallMobile ? 12 : 13) : 22,
+                    fontSize: isMobile
+                      ? isSmallMobile
+                        ? 12
+                        : 13
+                      : isTablet
+                      ? 18
+                      : 22,
                   }}
                 >
                   ⭕ Correct!
@@ -1102,7 +1166,13 @@ function KanjiQuizTestInner() {
                       ...styles.feedbackText,
                       color: "#c62828",
                       marginBottom: 6,
-                      fontSize: isMobile ? (isSmallMobile ? 12 : 13) : 22,
+                      fontSize: isMobile
+                        ? isSmallMobile
+                          ? 12
+                          : 13
+                        : isTablet
+                        ? 18
+                        : 22,
                     }}
                   >
                     ❌ Incorrect
@@ -1110,7 +1180,13 @@ function KanjiQuizTestInner() {
                   <p
                     style={{
                       ...styles.correctAnswerText,
-                      fontSize: isMobile ? (isSmallMobile ? 12 : 13) : 21,
+                      fontSize: isMobile
+                        ? isSmallMobile
+                          ? 12
+                          : 13
+                        : isTablet
+                        ? 17
+                        : 21,
                     }}
                   >
                     Correct answer: {currentQuestion.correctAnswer}
@@ -1123,6 +1199,7 @@ function KanjiQuizTestInner() {
               style={{
                 ...styles.nextWrap,
                 marginTop: isMobile ? 10 : 12,
+                paddingBottom: isTablet ? 18 : 0,
               }}
             >
               <button
@@ -1134,8 +1211,12 @@ function KanjiQuizTestInner() {
                   ...(saving || (!checked && !selected)
                     ? styles.nextButtonDisabled
                     : {}),
-                  fontSize: isMobile ? 16 : 20,
-                  padding: isMobile ? "10px 24px" : "12px 28px",
+                  fontSize: isMobile ? 16 : isTablet ? 18 : 20,
+                  padding: isMobile
+                    ? "10px 24px"
+                    : isTablet
+                    ? "12px 24px"
+                    : "12px 28px",
                 }}
               >
                 {saving
@@ -1189,33 +1270,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
     textAlign: "center",
-  },
-  finishCard: {
-    background: "#fff",
-    borderRadius: 28,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-    textAlign: "center",
-    minWidth: 320,
-  },
-  finishTitle: {
-    margin: 0,
-    fontWeight: 900,
-    color: "#111",
-  },
-  finishText: {
-    margin: "14px 0 0",
-    fontWeight: 700,
-    color: "#333",
-  },
-  finishButton: {
-    marginTop: 22,
-    border: "none",
-    borderRadius: 999,
-    background: "#111",
-    color: "#fff",
-    fontWeight: 900,
-    cursor: "pointer",
-    boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
   },
   setCompleteCard: {
     background: "#fff",

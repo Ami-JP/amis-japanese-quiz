@@ -94,15 +94,10 @@ function getSupabase() {
 
 function normalizeText(value: unknown): string {
   if (value == null) return "";
-
-  if (typeof value === "string") {
-    return value.trim();
-  }
-
+  if (typeof value === "string") return value.trim();
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value).trim();
   }
-
   return "";
 }
 
@@ -155,9 +150,7 @@ function parseLooseJsonArray(value: unknown): string[] {
         })
         .filter(Boolean);
     }
-  } catch {
-    // JSONではない文字列は下の分割処理へ
-  }
+  } catch {}
 
   return text
     .split(/[、,\n]/)
@@ -202,9 +195,7 @@ function parseRubyAnnotations(value: unknown): RubyAnnotationItem[] {
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parseRubyAnnotations(parsed);
-    } catch {
-      // JSONではない文字列は下の処理へ
-    }
+    } catch {}
 
     return raw
       .split(/[、,\n]/)
@@ -246,12 +237,10 @@ function normalizeDifficultyTier(value: unknown): string {
 
 function shuffleArray<T>(items: T[]) {
   const array = [...items];
-
   for (let i = array.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
   }
-
   return array;
 }
 
@@ -261,7 +250,6 @@ function pickString(row: Record<string, unknown>, keys: string[]) {
     const text = normalizeText(value);
     if (text) return text;
   }
-
   return "";
 }
 
@@ -499,9 +487,8 @@ function chooseOneReadingPerKanji(
   return selected.slice(0, QUESTION_LIMIT);
 }
 
-function hasMoreUnreadReadings(
+function hasMoreReadingVariants(
   pool: ReadingQuestionRow[],
-  historyMap: Record<string, ReadingHistoryRow>,
   selectedRows: ReadingQuestionRow[]
 ) {
   const selectedIds = new Set(selectedRows.map((row) => questionIdKey(row.id)));
@@ -509,9 +496,7 @@ function hasMoreUnreadReadings(
   return pool.some((row) => {
     const id = questionIdKey(row.id);
     if (!id) return false;
-    if (selectedIds.has(id)) return false;
-
-    return (historyMap[id]?.shown_count ?? 0) === 0;
+    return !selectedIds.has(id);
   });
 }
 
@@ -535,7 +520,7 @@ async function fetchKanjiHintMap(
 
     acc[kanji] = {
       kanji,
-      meaning_ja: pickString(row, ["meaning_ja"]),
+      meaning_ja: "",
       meaning_en: pickString(row, ["meaning_en"]),
       on_yomi: pickString(row, [
         "on_yomi",
@@ -733,18 +718,14 @@ export async function GET(request: NextRequest) {
 
     if (mode === "practice-set") {
       const practiceSetPool = filterPracticeSetPool(pool, startOrder, endOrder);
-      const questionIds = practiceSetPool.map((row) => questionIdKey(row.id)).filter(Boolean);
+      const questionIds = practiceSetPool
+        .map((row) => questionIdKey(row.id))
+        .filter(Boolean);
 
       const historyMap = await fetchReadingHistoryMap(db, account.id, questionIds);
       const selectedRows = chooseOneReadingPerKanji(practiceSetPool, historyMap);
       const hintMap = await buildHintMapForRows(db, selectedRows);
-
       const questions = selectedRows.map((row) => buildQuestionResponse(row, hintMap));
-      const hasMoreReadingVariants = hasMoreUnreadReadings(
-        practiceSetPool,
-        historyMap,
-        selectedRows
-      );
 
       return NextResponse.json({
         account: {
@@ -758,14 +739,16 @@ export async function GET(request: NextRequest) {
         endOrder,
         lastOrderCompleted: 0,
         finished: questions.length === 0,
-        hasMoreReadingVariants,
+        hasMoreReadingVariants: hasMoreReadingVariants(
+          practiceSetPool,
+          selectedRows
+        ),
         questions,
       });
     }
 
-    const hintMap = await buildHintMapForRows(db, pool);
-
     if (mode === "practice") {
+      const hintMap = await buildHintMapForRows(db, pool);
       const questions = shuffleArray(pool)
         .slice(0, QUESTION_LIMIT)
         .map((row) => buildQuestionResponse(row, hintMap));
@@ -790,17 +773,11 @@ export async function GET(request: NextRequest) {
     const progress = await getReadingProgress(db, account.id, unit, difficultyTier);
     const lastOrderCompleted = progress?.last_order_completed ?? 0;
 
-    let orderedRows = pool
+    const orderedRows = pool
       .filter((row) => row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted)
       .slice(0, QUESTION_LIMIT);
 
-    if (orderedRows.length === 0 && pool.length > 0) {
-      orderedRows = pool
-        .filter((row) => row.order_in_unit !== null)
-        .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
-        .slice(0, QUESTION_LIMIT);
-    }
-
+    const hintMap = await buildHintMapForRows(db, orderedRows);
     const questions = orderedRows.map((row) => buildQuestionResponse(row, hintMap));
 
     return NextResponse.json({
