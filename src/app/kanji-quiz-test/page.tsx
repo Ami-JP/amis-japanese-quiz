@@ -175,26 +175,6 @@ function KanjiQuizTestInner() {
     try {
       let data = await fetchBatchOnce(mode, practiceTarget);
       if (!data) return;
-
-      // unit指定の通常開始で questions が空なら、
-      // 学習者目線では「続きがない」より「そのunitの最初から」の方が自然なので
-      // 自動で先頭から再開する
-      if (
-        mode === "normal" &&
-        requestedUnit &&
-        (!data.questions || data.questions.length === 0)
-      ) {
-        const fallback = await fetchBatchOnce("practice-unit", {
-          unit: requestedUnit,
-          startOrder: 1,
-        });
-
-        if (fallback) {
-          data = fallback;
-          setQuizMode("practice-unit");
-        }
-      }
-
       setBatch(data);
     } catch (err) {
       setBatch(null);
@@ -435,6 +415,18 @@ function KanjiQuizTestInner() {
     await loadBatch("normal");
   }
 
+
+  function handleTryThisSetAgain() {
+    setShowSetComplete(false);
+    setPhase("main");
+    setMainIndex(0);
+    setReviewQueue([]);
+    setSelected("");
+    setChecked(false);
+    setWasCorrect(null);
+    setAttempts([]);
+  }
+
   async function handleContinueRequestedUnit() {
     setShowUnitStartScreen(false);
     await loadBatch("normal");
@@ -453,22 +445,6 @@ function KanjiQuizTestInner() {
     window.location.href = "/student-home";
   }
 
-  function handleGoToReadingQuiz() {
-    const target = lastCompletedSet ?? getPracticeTargetFromBatch(batch);
-
-    if (!target) {
-      window.location.href = `/kanji-reading-quiz?unit=${encodeURIComponent(
-        batch?.unit || requestedUnit || ""
-      )}&tier=normal&mode=normal`;
-      return;
-    }
-
-    window.location.href = `/kanji-reading-quiz?unit=${encodeURIComponent(
-      target.unit
-    )}&tier=normal&mode=practice-set&startOrder=${target.startOrder}&endOrder=${
-      target.endOrder ?? target.startOrder
-    }`;
-  }
 
   function getOptionStyle(option: QuizOption): React.CSSProperties {
     const selectedThis = selected === option.label;
@@ -529,7 +505,7 @@ function KanjiQuizTestInner() {
               onClick={handleContinueRequestedUnit}
               style={styles.emptyPrimaryButton}
             >
-              Continue this unit
+              Continue
             </button>
 
             <button
@@ -546,17 +522,9 @@ function KanjiQuizTestInner() {
             onClick={() => loadBatch("normal")}
             style={styles.emptyPrimaryButton}
           >
-            Back to quiz
+            Continue
           </button>
         )}
-
-        <button
-          type="button"
-          onClick={() => loadBatch("review-wrong")}
-          style={styles.emptySecondaryButton}
-        >
-          Review wrong answers
-        </button>
       </div>
     );
   }
@@ -638,7 +606,7 @@ function KanjiQuizTestInner() {
                 onClick={handleContinueRequestedUnit}
                 style={styles.emptyPrimaryButton}
               >
-                Continue this unit
+                Continue
               </button>
 
               <button
@@ -647,14 +615,6 @@ function KanjiQuizTestInner() {
                 style={styles.emptySecondaryButton}
               >
                 Start from beginning
-              </button>
-
-              <button
-                type="button"
-                onClick={() => loadBatch("review-wrong")}
-                style={styles.emptySecondaryButton}
-              >
-                Review wrong answers
               </button>
             </div>
           </div>
@@ -735,14 +695,26 @@ function KanjiQuizTestInner() {
             >
               <button
                 type="button"
-                onClick={handleGoToReadingQuiz}
+                onClick={() => loadBatch("review-wrong")}
                 style={{
                   ...styles.setCompletePrimaryButton,
                   width: isMobile ? "100%" : undefined,
                   fontSize: isMobile ? 16 : 18,
                 }}
               >
-                Go to Reading Quiz
+                Review wrong answers
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDoFiveMore}
+                style={{
+                  ...styles.setCompletePrimaryButton,
+                  width: isMobile ? "100%" : undefined,
+                  fontSize: isMobile ? 16 : 18,
+                }}
+              >
+                Study 5 more kanji
               </button>
 
               <button
@@ -756,51 +728,19 @@ function KanjiQuizTestInner() {
               >
                 Back to Home
               </button>
-            </div>
 
-            {lastSetWrongCount > 0 ? (
               <button
                 type="button"
-                onClick={() => loadBatch("review-wrong")}
-                style={{
-                  ...styles.reviewWrongButton,
-                  width: isMobile ? "100%" : undefined,
-                }}
-              >
-                Review wrong answers
-              </button>
-            ) : null}
-
-            <button
-              type="button"
-              onClick={handleDoFiveMore}
-              style={{
-                ...styles.setCompleteSecondaryButton,
-                width: isMobile ? "100%" : undefined,
-                marginTop: 16,
-              }}
-            >
-              Next 5 kanji
-            </button>
-
-            {(requestedUnit || batch?.unit) ? (
-              <button
-                type="button"
-                onClick={() =>
-                  loadBatch("practice-unit", {
-                    unit: batch?.unit || requestedUnit,
-                    startOrder: 1,
-                  })
-                }
+                onClick={handleTryThisSetAgain}
                 style={{
                   ...styles.setCompleteSecondaryButton,
                   width: isMobile ? "100%" : undefined,
-                  marginTop: 12,
+                  fontSize: isMobile ? 16 : 18,
                 }}
               >
-                Start from beginning
+                Try this set again
               </button>
-            ) : null}
+            </div>
           </div>
         </div>
       </main>
@@ -901,43 +841,6 @@ function KanjiQuizTestInner() {
                       right: 0,
                     }}
                   >
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.menuItem,
-                        fontSize: isMobile ? 14 : 16,
-                        padding: isMobile ? "12px 14px" : "14px 16px",
-                      }}
-                      onClick={requestedUnit ? handleContinueRequestedUnit : handleContinueCurrentUnit}
-                    >
-                      Continue this unit
-                    </button>
-
-                    {(requestedUnit || batch.unit) ? (
-                      <button
-                        type="button"
-                        style={{
-                          ...styles.menuItem,
-                          fontSize: isMobile ? 14 : 16,
-                          padding: isMobile ? "12px 14px" : "14px 16px",
-                        }}
-                        onClick={() => handleMenuAction("practice-unit")}
-                      >
-                        Start from beginning
-                      </button>
-                    ) : null}
-
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.menuItem,
-                        fontSize: isMobile ? 14 : 16,
-                        padding: isMobile ? "12px 14px" : "14px 16px",
-                      }}
-                      onClick={() => handleMenuAction("review-wrong")}
-                    >
-                      Review wrong answers
-                    </button>
 
                     <button
                       type="button"

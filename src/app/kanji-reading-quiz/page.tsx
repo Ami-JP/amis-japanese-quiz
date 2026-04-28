@@ -245,10 +245,14 @@ function KanjiReadingQuizInner() {
   const [checked, setChecked] = useState(false);
   const [wasCorrect, setWasCorrect] = useState<boolean | null>(null);
   const [showComplete, setShowComplete] = useState(false);
+  const [showStartScreen, setShowStartScreen] = useState(true);
 
   const [reviewQuestions, setReviewQuestions] = useState<
     ReadingQuestion[] | null
   >(null);
+  const [lastCompletedQuestions, setLastCompletedQuestions] = useState<
+    ReadingQuestion[]
+  >([]);
   const [currentMode, setCurrentMode] = useState<
     "normal" | "practice" | "practice-set" | "review"
   >(initialMode);
@@ -281,6 +285,7 @@ function KanjiReadingQuizInner() {
     setShowHint(false);
     setReviewQuestions(null);
     setMenuOpen(false);
+    setShowStartScreen(false);
 
     const params = new URLSearchParams();
     params.set("unit", unit);
@@ -322,10 +327,8 @@ function KanjiReadingQuizInner() {
   }
 
   useEffect(() => {
-    loadBatch(initialMode, {
-      startOrder,
-      endOrder,
-    });
+    setLoading(false);
+    setShowStartScreen(true);
   }, [unit, difficultyTier, initialMode, startOrderParam, endOrderParam]);
 
   useEffect(() => {
@@ -499,6 +502,7 @@ function KanjiReadingQuizInner() {
     }
 
     if (currentMode === "review") {
+      setLastCompletedQuestions(activeQuestions);
       setShowComplete(true);
       return;
     }
@@ -541,6 +545,7 @@ function KanjiReadingQuizInner() {
     }
 
     setSaving(false);
+    setLastCompletedQuestions(activeQuestions);
     setShowComplete(true);
   }
 
@@ -569,6 +574,29 @@ function KanjiReadingQuizInner() {
     setShowEnglish(false);
     setShowHint(false);
     setMenuOpen(false);
+    setShowStartScreen(false);
+
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 80);
+  }
+
+  function startPracticeThisSetAgain() {
+    if (lastCompletedQuestions.length === 0) return;
+
+    setCurrentMode("review");
+    setReviewQuestions(lastCompletedQuestions);
+    setQuestionIndex(0);
+    setAnswers([]);
+    setAttempts([]);
+    setChecked(false);
+    setWasCorrect(null);
+    setShowComplete(false);
+    setShowFurigana(false);
+    setShowEnglish(false);
+    setShowHint(false);
+    setMenuOpen(false);
+    setShowStartScreen(false);
 
     setTimeout(() => {
       inputRef.current?.focus();
@@ -595,45 +623,21 @@ function KanjiReadingQuizInner() {
     window.location.href = "/student-home";
   }
 
-  function goToMeaningQuiz() {
-    if (!batch) return;
-
-    window.location.href = `/kanji-quiz-test?unit=${encodeURIComponent(
-      batch.unit
-    )}&tier=${encodeURIComponent(batch.difficulty_tier)}&mode=normal`;
-  }
-
   async function handlePracticeMoreReadings() {
-    if (!batch) return;
-    if (batch.mode !== "practice-set") return;
-    if (batch.startOrder == null || batch.endOrder == null) return;
-
-    await loadBatch("practice-set", {
-      startOrder: batch.startOrder,
-      endOrder: batch.endOrder,
-    });
-  }
-
-  async function handleStudyNextFiveKanji() {
     setMenuOpen(false);
     await loadBatch("normal");
   }
 
+  async function handleContinueFromStartScreen() {
+    await loadBatch("normal");
+  }
+
+  async function handleStartFromBeginningFromStartScreen() {
+    await loadBatch("practice");
+  }
+
   async function handleContinueMenu() {
     setMenuOpen(false);
-
-    if (
-      batch?.mode === "practice-set" &&
-      batch.startOrder != null &&
-      batch.endOrder != null
-    ) {
-      await loadBatch("practice-set", {
-        startOrder: batch.startOrder,
-        endOrder: batch.endOrder,
-      });
-      return;
-    }
-
     await loadBatch("normal");
   }
 
@@ -727,14 +731,45 @@ function KanjiReadingQuizInner() {
 
   const correctCount = attempts.filter((a) => a.is_correct).length;
   const wrongCount = attempts.filter((a) => !a.is_correct).length;
-  const isPracticeSet = batch?.mode === "practice-set";
-  const hasMoreReadings = batch?.hasMoreReadingVariants === true;
 
   if (loading) {
     return (
       <main style={styles.page}>
         <div style={styles.centerWrap}>
           <div style={styles.loadingCard}>Loading...</div>
+        </div>
+      </main>
+    );
+  }
+
+  if (showStartScreen) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div style={styles.messageCard}>
+            <h2 style={styles.messageTitle}>Ready to study?</h2>
+            <p style={styles.messageText}>
+              Unit: <strong>{unit}</strong>
+            </p>
+
+            <div style={styles.completeButtons}>
+              <button
+                type="button"
+                onClick={handleContinueFromStartScreen}
+                style={styles.primaryButton}
+              >
+                Continue
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartFromBeginningFromStartScreen}
+                style={styles.secondaryButton}
+              >
+                Start from beginning
+              </button>
+            </div>
+          </div>
         </div>
       </main>
     );
@@ -768,89 +803,37 @@ function KanjiReadingQuizInner() {
             <p style={styles.messageText}>Wrong: {wrongCount}</p>
 
             <div style={styles.completeButtons}>
-              {isPracticeSet && hasMoreReadings ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={handlePracticeMoreReadings}
-                    style={styles.primaryButton}
-                  >
-                    Practice more readings
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleStudyNextFiveKanji}
-                    style={styles.secondaryButton}
-                  >
-                    Study next 5 kanji
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={goHome}
-                    style={styles.secondaryButton}
-                  >
-                    Back to Home
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleStudyNextFiveKanji}
-                    style={styles.primaryButton}
-                  >
-                    Study next 5 kanji
-                  </button>
-
-                  {isPracticeSet ? (
-                    <button
-                      type="button"
-                      onClick={handlePracticeMoreReadings}
-                      style={styles.secondaryButton}
-                    >
-                      Practice more readings
-                    </button>
-                  ) : null}
-
-                  <button
-                    type="button"
-                    onClick={goHome}
-                    style={styles.secondaryButton}
-                  >
-                    Back to Home
-                  </button>
-                </>
-              )}
-
-              {currentMode !== "review" && wrongCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={startWrongReview}
-                  style={styles.secondaryButton}
-                >
-                  Review wrong answers
-                </button>
-              ) : null}
+              <button
+                type="button"
+                onClick={startWrongReview}
+                style={styles.primaryButton}
+              >
+                Review wrong answers
+              </button>
 
               <button
                 type="button"
-                onClick={goToMeaningQuiz}
-                style={styles.secondaryButton}
+                onClick={handlePracticeMoreReadings}
+                style={styles.primaryButton}
               >
-                Go to Meaning Quiz
+                Practice 5 more
               </button>
 
-              {!isPracticeSet ? (
-                <button
-                  type="button"
-                  onClick={() => loadBatch("practice")}
-                  style={styles.secondaryButton}
-                >
-                  Restart this unit
-                </button>
-              ) : null}
+              <button
+                type="button"
+                onClick={goHome}
+                style={styles.secondaryButton}
+              >
+                Back to Home
+              </button>
+
+              <button
+                type="button"
+                onClick={startPracticeThisSetAgain}
+                style={styles.secondaryButton}
+              >
+                Practice this set again
+              </button>
             </div>
           </div>
         </div>
@@ -983,14 +966,6 @@ function KanjiReadingQuizInner() {
                 <button
                   type="button"
                   style={styles.menuItem}
-                  onClick={handleStudyNextFiveKanji}
-                >
-                  Study next 5 kanji
-                </button>
-
-                <button
-                  type="button"
-                  style={styles.menuItem}
                   onClick={handleRestartUnit}
                 >
                   Start from beginning
@@ -1111,7 +1086,13 @@ function KanjiReadingQuizInner() {
                 >
                   <span style={styles.centeredButtonText}>ふりがなを表示</span>
                   <span style={styles.centeredButtonText}>Show Furigana</span>
-                  <span style={{ ...styles.sideButtonNote, width: "100%", textAlign: "center" }}>
+                  <span
+                    style={{
+                      ...styles.sideButtonNote,
+                      width: "100%",
+                      textAlign: "center",
+                    }}
+                  >
                     (for Other Kanji)
                   </span>
                 </button>
@@ -1293,10 +1274,10 @@ function KanjiReadingQuizInner() {
 
                       <button
                         type="button"
-                        onClick={() => loadBatch("practice")}
+                        onClick={startPracticeThisSetAgain}
                         style={styles.secondaryButton}
                       >
-                        Restart this unit
+                        Practice this set again
                       </button>
                     </div>
                   </div>
@@ -1434,7 +1415,13 @@ function KanjiReadingQuizInner() {
                 >
                   <span style={styles.centeredButtonText}>ふりがなを表示</span>
                   <span style={styles.centeredButtonText}>Show Furigana</span>
-                  <span style={{ ...styles.sideButtonNote, width: "100%", textAlign: "center" }}>
+                  <span
+                    style={{
+                      ...styles.sideButtonNote,
+                      width: "100%",
+                      textAlign: "center",
+                    }}
+                  >
                     (for Other Kanji)
                   </span>
                 </button>
@@ -1638,7 +1625,7 @@ function KanjiReadingQuizInner() {
 
                 <button
                   type="button"
-                  onClick={() => loadBatch("practice")}
+                  onClick={startPracticeThisSetAgain}
                   style={{
                     ...styles.secondaryButton,
                     width: "100%",
@@ -1646,7 +1633,7 @@ function KanjiReadingQuizInner() {
                     padding: isTablet ? "12px 18px" : "10px 14px",
                   }}
                 >
-                  Restart this unit
+                  Practice this set again
                 </button>
               </div>
             </div>

@@ -55,6 +55,14 @@ export default async function StudentHomePage() {
           <p style={styles.subtitle}>
             Choose a unit and practice the meaning and reading.
           </p>
+          <div style={styles.guidanceBox}>
+            <p style={styles.guidanceText}>
+              Meaning Quiz and Reading Quiz use the same unit order.
+            </p>
+            <p style={styles.guidanceText}>
+              Studying both together can help you learn kanji more effectively.
+            </p>
+          </div>
         </div>
 
         <div style={styles.unitList}>
@@ -177,6 +185,22 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
     fontWeight: 700,
     color: "#536174",
+  },
+
+  guidanceBox: {
+    marginTop: 14,
+    padding: "12px 14px",
+    borderRadius: 18,
+    background: "#f3f8ff",
+    border: "2px solid #c9dbf5",
+  },
+
+  guidanceText: {
+    margin: 0,
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1.45,
+    color: "#425167",
   },
 
   unitList: {

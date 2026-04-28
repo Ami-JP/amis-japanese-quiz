@@ -748,10 +748,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (mode === "practice") {
-      const hintMap = await buildHintMapForRows(db, pool);
-      const questions = shuffleArray(pool)
-        .slice(0, QUESTION_LIMIT)
-        .map((row) => buildQuestionResponse(row, hintMap));
+      const orderedRows = pool
+        .filter((row) => row.order_in_unit !== null && row.order_in_unit >= 1)
+        .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
+        .slice(0, QUESTION_LIMIT);
+
+      const hintMap = await buildHintMapForRows(db, orderedRows);
+      const questions = orderedRows.map((row) => buildQuestionResponse(row, hintMap));
 
       return NextResponse.json({
         account: {
