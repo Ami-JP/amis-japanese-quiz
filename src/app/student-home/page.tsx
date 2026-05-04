@@ -372,8 +372,8 @@ const styles: Record<string, React.CSSProperties> = {
 
   clearStamp: {
     position: "absolute",
-    top: 8,
-    right: 8,
+    top: -6,
+    right: -6,
     border: "2px solid #c62828",
     color: "#c62828",
     background: "rgba(255,255,255,0.92)",

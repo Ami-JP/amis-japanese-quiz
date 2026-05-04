@@ -406,6 +406,27 @@ function KanjiQuizTestInner() {
         const ok = await saveSetOnly();
         if (!ok) return;
 
+        const params = new URLSearchParams();
+        params.set("mode", "normal");
+        if (requestedUnit) {
+          params.set("unit", requestedUnit);
+        } else if (batch?.unit) {
+          params.set("unit", batch.unit);
+        }
+
+        const checkRes = await fetch(`/api/kanji-quiz-test?${params.toString()}`, {
+          method: "GET",
+          credentials: "include",
+        });
+
+        if (checkRes.ok) {
+          const checkData = await checkRes.json();
+          if (checkData.isUnitComplete === true) {
+            setShowUnitComplete(true);
+            return;
+          }
+        }
+
         openSetCompleteScreen();
       }
     }

@@ -598,42 +598,19 @@ export async function GET(request: NextRequest) {
       .slice(0, QUESTION_LIMIT);
 
     if (orderedRows.length === 0 && lockedToUnit) {
-      const maxOrder = activePool.reduce((max, row) => {
-        const current = row.order_in_unit ?? 0;
-        return current > max ? current : max;
-      }, 0);
-
-      if (maxOrder > 0 && activeLastOrderCompleted >= maxOrder) {
-        const resetRow = {
-          student_account_id: account.id,
-          unit: activeUnit,
-          last_order_completed: 0,
-          last_studied_at: new Date().toISOString(),
-          is_completed: false,
-        };
-
-        const { error: resetError } = await db
-          .from("student_kanji_progress")
-          .upsert(resetRow);
-
-        if (resetError) {
-          return NextResponse.json(
-            { error: resetError.message },
-            { status: 400 }
-          );
-        }
-
-        activeLastOrderCompleted = 0;
-      }
-
-      orderedRows = activePool
-        .filter(
-          (row) =>
-            row.order_in_unit !== null &&
-            row.order_in_unit > activeLastOrderCompleted
-        )
-        .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
-        .slice(0, QUESTION_LIMIT);
+      return NextResponse.json({
+        account: {
+          display_name: account.display_name,
+          student_login_id: account.student_login_id,
+        },
+        unit: activeUnit,
+        lastOrderCompleted: activeLastOrderCompleted,
+        mode,
+        lockedToUnit,
+        finished: true,
+        isUnitComplete: true,
+        questions: [],
+      });
     }
 
     if (orderedRows.length === 0 && !lockedToUnit) {
