@@ -463,6 +463,7 @@ export async function GET(request: NextRequest) {
           mode,
           lockedToUnit: false,
           finished: true,
+          isUnitComplete: false,
           questions: [],
         });
       }
@@ -486,6 +487,7 @@ export async function GET(request: NextRequest) {
         mode,
         lockedToUnit: false,
         finished: sourceRows.length === 0,
+        isUnitComplete: false,
         questions: makeQuizItems(sourceRows, globalPool),
       });
     }
@@ -527,6 +529,7 @@ export async function GET(request: NextRequest) {
         mode,
         lockedToUnit: true,
         finished: sourceRows.length === 0,
+        isUnitComplete: false,
         questions: makeQuizItems(sourceRows, unitPool),
       });
     }
@@ -566,6 +569,7 @@ export async function GET(request: NextRequest) {
         mode,
         lockedToUnit: true,
         finished: sourceRows.length === 0,
+        isUnitComplete: sourceRows.length === 0,
         questions: makeQuizItems(sourceRows, unitPool),
       });
     }
@@ -712,6 +716,7 @@ export async function GET(request: NextRequest) {
       mode,
       lockedToUnit,
       finished: sourceRows.length === 0,
+      isUnitComplete: sourceRows.length === 0,
       questions: makeQuizItems(sourceRows, activePool),
     });
   } catch (error) {

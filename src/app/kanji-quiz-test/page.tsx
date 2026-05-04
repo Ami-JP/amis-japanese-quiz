@@ -27,6 +27,7 @@ type BatchResponse = {
   mode?: string;
   lockedToUnit?: boolean;
   finished?: boolean;
+  isUnitComplete?: boolean;
   questions: QuizQuestion[];
 };
 
@@ -80,6 +81,7 @@ function KanjiQuizTestInner() {
     null
   );
   const [showUnitStartScreen, setShowUnitStartScreen] = useState(false);
+  const [showUnitComplete, setShowUnitComplete] = useState(false);
 
   const [windowWidth, setWindowWidth] = useState(1200);
 
@@ -171,11 +173,17 @@ function KanjiQuizTestInner() {
     setAttempts([]);
     setQuizMode(mode);
     setShowSetComplete(false);
+    setShowUnitComplete(false);
 
     try {
       let data = await fetchBatchOnce(mode, practiceTarget);
       if (!data) return;
       setBatch(data);
+
+      if (data.isUnitComplete === true && (!data.questions || data.questions.length === 0)) {
+        setShowUnitComplete(true);
+        return;
+      }
     } catch (err) {
       setBatch(null);
       setError(err instanceof Error ? err.message : "Failed to load quiz.");
@@ -360,6 +368,27 @@ function KanjiQuizTestInner() {
       const ok = await saveSetOnly();
       if (!ok) return;
 
+      const params = new URLSearchParams();
+      params.set("mode", "normal");
+      if (requestedUnit) {
+        params.set("unit", requestedUnit);
+      } else if (batch?.unit) {
+        params.set("unit", batch.unit);
+      }
+
+      const checkRes = await fetch(`/api/kanji-quiz-test?${params.toString()}`, {
+        method: "GET",
+        credentials: "include",
+      });
+
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        if (checkData.isUnitComplete === true) {
+          setShowUnitComplete(true);
+          return;
+        }
+      }
+
       openSetCompleteScreen();
       return;
     }
@@ -433,10 +462,12 @@ function KanjiQuizTestInner() {
   }
 
   async function handlePracticeRequestedUnit() {
-    if (!requestedUnit) return;
+    const targetUnit = requestedUnit || batch?.unit;
+    if (!targetUnit) return;
     setShowUnitStartScreen(false);
+    setShowUnitComplete(false);
     await loadBatch("practice-unit", {
-      unit: requestedUnit,
+      unit: targetUnit,
       startOrder: 1,
     });
   }
@@ -576,6 +607,46 @@ function KanjiQuizTestInner() {
       <main style={styles.page}>
         <div style={styles.centerWrap}>
           <div style={styles.loadingCard}>Please wait a moment...</div>
+        </div>
+      </main>
+    );
+  }
+
+  if (showUnitComplete) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div
+            style={{
+              ...styles.emptyCard,
+              width: isMobile ? "92%" : 760,
+            }}
+          >
+            <h2 style={styles.emptyTitle}>Congratulations!</h2>
+            <p style={styles.emptyText}>You finished this unit!</p>
+            <div
+              style={{
+                ...styles.emptyButtons,
+                flexDirection: isMobile ? "column" : "row",
+              }}
+            >
+              <button
+                type="button"
+                onClick={handleBackToHome}
+                style={styles.emptyPrimaryButton}
+              >
+                Back to Home
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePracticeRequestedUnit}
+                style={styles.emptySecondaryButton}
+              >
+                Start from beginning
+              </button>
+            </div>
+          </div>
         </div>
       </main>
     );

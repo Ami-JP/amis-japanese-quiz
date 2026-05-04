@@ -23,6 +23,12 @@ const UNITS = [
   },
 ];
 
+type UnitStatus = {
+  meaningClear: boolean;
+  readingClear: boolean;
+  hasAdvanced: boolean;
+};
+
 export default async function StudentHomePage() {
   const session = await getStudentSession();
 
@@ -37,6 +43,53 @@ export default async function StudentHomePage() {
     .select("display_name, student_login_id")
     .eq("id", session.studentAccountId)
     .maybeSingle();
+
+  const statusMap: Record<string, UnitStatus> = {};
+
+  for (const item of UNITS) {
+    if (!item.available) {
+      statusMap[item.unit] = {
+        meaningClear: false,
+        readingClear: false,
+        hasAdvanced: false,
+      };
+      continue;
+    }
+
+    const [
+      { data: meaningProgress },
+      { data: readingProgress },
+      { count: advancedCount },
+    ] = await Promise.all([
+      db
+        .from("student_kanji_progress")
+        .select("is_completed")
+        .eq("student_account_id", session.studentAccountId)
+        .eq("unit", item.unit)
+        .maybeSingle(),
+
+      db
+        .from("student_reading_progress")
+        .select("is_completed")
+        .eq("student_account_id", session.studentAccountId)
+        .eq("unit", item.unit)
+        .eq("difficulty_tier", "normal")
+        .maybeSingle(),
+
+      db
+        .from("questions_master")
+        .select("*", { count: "exact", head: true })
+        .eq("unit", item.unit)
+        .eq("is_published", true)
+        .eq("difficulty_tier", "high_level"),
+    ]);
+
+    statusMap[item.unit] = {
+      meaningClear: meaningProgress?.is_completed === true,
+      readingClear: readingProgress?.is_completed === true,
+      hasAdvanced: (advancedCount ?? 0) > 0,
+    };
+  }
 
   return (
     <main style={styles.page}>
@@ -66,54 +119,71 @@ export default async function StudentHomePage() {
         </div>
 
         <div style={styles.unitList}>
-          {UNITS.map((item) => (
-            <section key={item.unit} style={styles.unitCard}>
-              <div style={styles.unitHeader}>
-                <div>
-                  <p style={styles.levelText}>{item.levelLabel}</p>
-                  <h2 style={styles.unitTitle}>{item.unitLabel}</h2>
+          {UNITS.map((item) => {
+            const status = statusMap[item.unit] ?? {
+              meaningClear: false,
+              readingClear: false,
+              hasAdvanced: false,
+            };
+
+            return (
+              <section key={item.unit} style={styles.unitCard}>
+                <div style={styles.unitHeader}>
+                  <div>
+                    <p style={styles.levelText}>{item.levelLabel}</p>
+                    <h2 style={styles.unitTitle}>{item.unitLabel}</h2>
+                  </div>
+
+                  {!item.available ? (
+                    <span style={styles.comingSoon}>Coming soon</span>
+                  ) : null}
                 </div>
 
-                {!item.available ? (
-                  <span style={styles.comingSoon}>Coming soon</span>
-                ) : null}
-              </div>
+                <div style={styles.buttonGrid}>
+                  <a
+                    href={
+                      item.available
+                        ? `/kanji-quiz-test?unit=${item.unit}&tier=normal&mode=normal`
+                        : "#"
+                    }
+                    style={{
+                      ...styles.quizButton,
+                      ...styles.meaningButton,
+                      ...(item.available ? {} : styles.disabledButton),
+                    }}
+                  >
+                    {status.meaningClear ? (
+                      <span style={styles.clearStamp}>CLEAR</span>
+                    ) : null}
+                    <span style={styles.buttonMain}>Meaning Quiz</span>
+                    <span style={styles.buttonSub}>意味クイズ</span>
+                  </a>
 
-              <div style={styles.buttonGrid}>
-                <a
-                  href={
-                    item.available
-                      ? `/kanji-quiz-test?unit=${item.unit}&tier=normal&mode=normal`
-                      : "#"
-                  }
-                  style={{
-                    ...styles.quizButton,
-                    ...styles.meaningButton,
-                    ...(item.available ? {} : styles.disabledButton),
-                  }}
-                >
-                  <span style={styles.buttonMain}>Meaning Quiz</span>
-                  <span style={styles.buttonSub}>意味クイズ</span>
-                </a>
-
-                <a
-                  href={
-                    item.available
-                      ? `/kanji-reading-quiz?unit=${item.unit}&tier=normal&mode=normal`
-                      : "#"
-                  }
-                  style={{
-                    ...styles.quizButton,
-                    ...styles.readingButton,
-                    ...(item.available ? {} : styles.disabledButton),
-                  }}
-                >
-                  <span style={styles.buttonMain}>Reading Quiz</span>
-                  <span style={styles.buttonSub}>読みクイズ</span>
-                </a>
-              </div>
-            </section>
-          ))}
+                  <a
+                    href={
+                      item.available
+                        ? `/kanji-reading-quiz?unit=${item.unit}&tier=normal&mode=normal`
+                        : "#"
+                    }
+                    style={{
+                      ...styles.quizButton,
+                      ...styles.readingButton,
+                      ...(item.available ? {} : styles.disabledButton),
+                    }}
+                  >
+                    {status.readingClear ? (
+                      <span style={styles.clearStamp}>CLEAR</span>
+                    ) : null}
+                    <span style={styles.buttonMain}>Reading Quiz</span>
+                    <span style={styles.buttonSub}>読みクイズ</span>
+                    {status.hasAdvanced ? (
+                      <span style={styles.advancedHint}>Advanced available</span>
+                    ) : null}
+                  </a>
+                </div>
+              </section>
+            );
+          })}
         </div>
       </section>
     </main>
@@ -252,6 +322,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   quizButton: {
+    position: "relative",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -260,39 +331,56 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 20,
     border: "3px solid #1f2b3d",
     textDecoration: "none",
-    color: "#111",
-    boxShadow: "0 6px 0 rgba(31,43,61,0.14)",
-    transition: "transform 0.12s ease",
+    color: "#172033",
+    boxShadow: "0 7px 0 rgba(31,43,61,0.12)",
+    padding: "12px 10px",
     textAlign: "center",
   },
 
   meaningButton: {
-    background: "#ddef57",
+    background: "#fff3c4",
   },
 
   readingButton: {
-    background: "#9ec1f0",
+    background: "#d9ecff",
   },
 
   disabledButton: {
     pointerEvents: "none",
-    opacity: 0.45,
-    boxShadow: "none",
+    opacity: 0.5,
   },
 
   buttonMain: {
-    width: "100%",
-    textAlign: "center",
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 900,
-    lineHeight: 1.05,
+    lineHeight: 1.1,
   },
 
   buttonSub: {
-    width: "100%",
-    textAlign: "center",
-    marginTop: 5,
-    fontSize: 14,
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#516071",
+  },
+
+  advancedHint: {
+    marginTop: 8,
+    fontSize: 12,
     fontWeight: 900,
+    color: "#b42318",
+  },
+
+  clearStamp: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    border: "2px solid #c62828",
+    color: "#c62828",
+    background: "rgba(255,255,255,0.92)",
+    borderRadius: 999,
+    padding: "3px 8px",
+    fontSize: 11,
+    fontWeight: 900,
+    transform: "rotate(8deg)",
   },
 };

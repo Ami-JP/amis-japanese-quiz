@@ -235,15 +235,6 @@ function normalizeDifficultyTier(value: unknown): string {
   return text || "normal";
 }
 
-function shuffleArray<T>(items: T[]) {
-  const array = [...items];
-  for (let i = array.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-
 function pickString(row: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -324,6 +315,21 @@ async function getReadingProgress(
   return (data ?? null) as ReadingProgress | null;
 }
 
+async function hasAdvancedReadingQuestions(db: any, unit: string) {
+  const { count, error } = await db
+    .from(TABLE_NAME)
+    .select("*", { count: "exact", head: true })
+    .eq("unit", unit)
+    .eq("is_published", true)
+    .eq("difficulty_tier", "high_level");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (count ?? 0) > 0;
+}
+
 async function fetchQuestionPool(
   db: any,
   unit: string,
@@ -362,9 +368,9 @@ async function fetchQuestionPool(
     )
     .eq("unit", unit)
     .eq("is_published", true)
+    .order("order_in_unit", { ascending: true })
     .order("kanji_order_in_unit", { ascending: true, nullsFirst: false })
-    .order("reading_variant_order", { ascending: true, nullsFirst: false })
-    .order("order_in_unit", { ascending: true });
+    .order("reading_variant_order", { ascending: true, nullsFirst: false });
 
   if (error) {
     throw new Error(error.message);
@@ -693,6 +699,13 @@ async function updateReadingQuestionHistory(
   }
 }
 
+function getMaxAttemptOrder(attempts: AttemptRow[]) {
+  return attempts.reduce((max, item) => {
+    const order = normalizeNumber(item.order_in_unit) ?? 0;
+    return order > max ? order : max;
+  }, 0);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
@@ -714,7 +727,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "unit is required." }, { status: 400 });
     }
 
-    const pool = await fetchQuestionPool(db, unit, difficultyTier);
+    const [pool, advancedAvailable] = await Promise.all([
+      fetchQuestionPool(db, unit, difficultyTier),
+      hasAdvancedReadingQuestions(db, unit),
+    ]);
 
     if (mode === "practice-set") {
       const practiceSetPool = filterPracticeSetPool(pool, startOrder, endOrder);
@@ -739,6 +755,8 @@ export async function GET(request: NextRequest) {
         endOrder,
         lastOrderCompleted: 0,
         finished: questions.length === 0,
+        isUnitComplete: false,
+        hasAdvancedAvailable: advancedAvailable,
         hasMoreReadingVariants: hasMoreReadingVariants(
           practiceSetPool,
           selectedRows
@@ -768,6 +786,8 @@ export async function GET(request: NextRequest) {
         endOrder: null,
         lastOrderCompleted: 0,
         finished: questions.length === 0,
+        isUnitComplete: false,
+        hasAdvancedAvailable: advancedAvailable,
         hasMoreReadingVariants: false,
         questions,
       });
@@ -777,11 +797,17 @@ export async function GET(request: NextRequest) {
     const lastOrderCompleted = progress?.last_order_completed ?? 0;
 
     const orderedRows = pool
-      .filter((row) => row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted)
+      .filter(
+        (row) =>
+          row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted
+      )
+      .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
       .slice(0, QUESTION_LIMIT);
 
     const hintMap = await buildHintMapForRows(db, orderedRows);
     const questions = orderedRows.map((row) => buildQuestionResponse(row, hintMap));
+
+    const isUnitComplete = questions.length === 0;
 
     return NextResponse.json({
       account: {
@@ -794,7 +820,9 @@ export async function GET(request: NextRequest) {
       startOrder: null,
       endOrder: null,
       lastOrderCompleted,
-      finished: questions.length === 0,
+      finished: isUnitComplete,
+      isUnitComplete,
+      hasAdvancedAvailable: advancedAvailable,
       hasMoreReadingVariants: false,
       questions,
     });
@@ -818,8 +846,11 @@ export async function POST(request: NextRequest) {
     const unit = normalizeText(body.unit);
     const difficultyTier = normalizeDifficultyTier(body.difficulty_tier);
     const mode = normalizeText(body.mode) || "normal";
-    const attempts = Array.isArray(body.attempts) ? (body.attempts as AttemptRow[]) : [];
-    const advanceCount = typeof body.advanceCount === "number" ? body.advanceCount : 0;
+    const attempts = Array.isArray(body.attempts)
+      ? (body.attempts as AttemptRow[])
+      : [];
+    const advanceCount =
+      typeof body.advanceCount === "number" ? body.advanceCount : 0;
 
     if (!unit) {
       return NextResponse.json({ error: "unit is required." }, { status: 400 });
@@ -849,13 +880,18 @@ export async function POST(request: NextRequest) {
       await updateReadingQuestionHistory(db, account.id, unit, attempts);
     }
 
-    if (mode === "normal" && advanceCount > 0) {
+    if (mode === "normal") {
       const current = await getReadingProgress(db, account.id, unit, difficultyTier);
 
-      const newLastOrderCompleted =
-        (current?.last_order_completed ?? 0) + advanceCount;
+      const currentLastOrder = current?.last_order_completed ?? 0;
+      const maxAttemptOrder = getMaxAttemptOrder(attempts);
 
-      const progressRow = {
+      const newLastOrderCompleted =
+        maxAttemptOrder > 0
+          ? Math.max(currentLastOrder, maxAttemptOrder)
+          : currentLastOrder + Math.max(advanceCount, 0);
+
+      const baseProgressRow = {
         student_account_id: account.id,
         unit,
         difficulty_tier: difficultyTier,
@@ -867,7 +903,7 @@ export async function POST(request: NextRequest) {
 
       const { error: upsertError } = await db
         .from("student_reading_progress")
-        .upsert(progressRow);
+        .upsert(baseProgressRow);
 
       if (upsertError) {
         return NextResponse.json({ error: upsertError.message }, { status: 400 });
@@ -882,7 +918,7 @@ export async function POST(request: NextRequest) {
         const { error: completeError } = await db
           .from("student_reading_progress")
           .upsert({
-            ...progressRow,
+            ...baseProgressRow,
             is_completed: true,
           });
 

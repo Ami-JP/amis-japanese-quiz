@@ -51,6 +51,8 @@ type BatchResponse = {
   endOrder?: number | null;
   lastOrderCompleted: number;
   finished: boolean;
+  isUnitComplete?: boolean;
+  hasAdvancedAvailable?: boolean;
   hasMoreReadingVariants?: boolean;
   questions: ReadingQuestion[];
 };
@@ -67,6 +69,10 @@ type AttemptRow = {
   correct_answer: string;
   is_correct: boolean;
   difficulty_tier: string;
+};
+
+type StartMeta = {
+  hasAdvancedAvailable: boolean;
 };
 
 const ASSETS = {
@@ -233,6 +239,9 @@ function KanjiReadingQuizInner() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState("");
   const [batch, setBatch] = useState<BatchResponse | null>(null);
+  const [startMeta, setStartMeta] = useState<StartMeta>({
+    hasAdvancedAvailable: false,
+  });
 
   const [questionIndex, setQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
@@ -246,6 +255,7 @@ function KanjiReadingQuizInner() {
   const [wasCorrect, setWasCorrect] = useState<boolean | null>(null);
   const [showComplete, setShowComplete] = useState(false);
   const [showStartScreen, setShowStartScreen] = useState(true);
+  const [showUnitComplete, setShowUnitComplete] = useState(false);
 
   const [reviewQuestions, setReviewQuestions] = useState<
     ReadingQuestion[] | null
@@ -261,15 +271,61 @@ function KanjiReadingQuizInner() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
+  async function fetchMeta() {
+    if (!unit) {
+      setLoading(false);
+      setError("unit is required in the URL.");
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/kanji-reading-quiz?unit=${encodeURIComponent(
+          unit
+        )}&tier=normal&mode=normal`,
+        {
+          credentials: "include",
+        }
+      );
+
+      if (res.status === 401) {
+        window.location.href = "/student-login";
+        return;
+      }
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error ?? "Failed to load quiz.");
+        setLoading(false);
+        return;
+      }
+
+      setStartMeta({
+        hasAdvancedAvailable: data.hasAdvancedAvailable === true,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load quiz.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function loadBatch(
     mode: "normal" | "practice" | "practice-set",
-    options?: { startOrder?: number | null; endOrder?: number | null }
+    options?: {
+      startOrder?: number | null;
+      endOrder?: number | null;
+      tier?: string;
+    }
   ) {
     if (!unit) {
       setError("unit is required in the URL.");
       setLoading(false);
       return;
     }
+
+    const targetTier = options?.tier ?? difficultyTier;
 
     setCurrentMode(mode);
     setLoading(true);
@@ -280,6 +336,7 @@ function KanjiReadingQuizInner() {
     setChecked(false);
     setWasCorrect(null);
     setShowComplete(false);
+    setShowUnitComplete(false);
     setShowFurigana(false);
     setShowEnglish(false);
     setShowHint(false);
@@ -289,7 +346,7 @@ function KanjiReadingQuizInner() {
 
     const params = new URLSearchParams();
     params.set("unit", unit);
-    params.set("tier", difficultyTier);
+    params.set("tier", targetTier);
     params.set("mode", mode);
 
     if (mode === "practice-set") {
@@ -319,7 +376,15 @@ function KanjiReadingQuizInner() {
     }
 
     setBatch(data);
+    setStartMeta({
+      hasAdvancedAvailable: data.hasAdvancedAvailable === true,
+    });
     setLoading(false);
+
+    if (data.isUnitComplete === true && data.questions.length === 0) {
+      setShowUnitComplete(true);
+      return;
+    }
 
     setTimeout(() => {
       inputRef.current?.focus();
@@ -327,8 +392,10 @@ function KanjiReadingQuizInner() {
   }
 
   useEffect(() => {
-    setLoading(false);
     setShowStartScreen(true);
+    setShowComplete(false);
+    setShowUnitComplete(false);
+    fetchMeta();
   }, [unit, difficultyTier, initialMode, startOrderParam, endOrderParam]);
 
   useEffect(() => {
@@ -546,6 +613,26 @@ function KanjiReadingQuizInner() {
 
     setSaving(false);
     setLastCompletedQuestions(activeQuestions);
+
+    if (batch.mode === "normal") {
+      const checkRes = await fetch(
+        `/api/kanji-reading-quiz?unit=${encodeURIComponent(
+          batch.unit
+        )}&tier=${encodeURIComponent(batch.difficulty_tier)}&mode=normal`,
+        {
+          credentials: "include",
+        }
+      );
+
+      if (checkRes.ok) {
+        const nextData = await checkRes.json();
+        if (nextData.isUnitComplete === true) {
+          setShowUnitComplete(true);
+          return;
+        }
+      }
+    }
+
     setShowComplete(true);
   }
 
@@ -625,25 +712,31 @@ function KanjiReadingQuizInner() {
 
   async function handlePracticeMoreReadings() {
     setMenuOpen(false);
-    await loadBatch("normal");
+    await loadBatch("normal", { tier: difficultyTier });
   }
 
   async function handleContinueFromStartScreen() {
-    await loadBatch("normal");
+    await loadBatch("normal", { tier: difficultyTier });
   }
 
   async function handleStartFromBeginningFromStartScreen() {
-    await loadBatch("practice");
+    await loadBatch("practice", { tier: difficultyTier });
+  }
+
+  async function handleTryAdvancedReading() {
+    window.location.href = `/kanji-reading-quiz?unit=${encodeURIComponent(
+      unit
+    )}&tier=high_level&mode=normal`;
   }
 
   async function handleContinueMenu() {
     setMenuOpen(false);
-    await loadBatch("normal");
+    await loadBatch("normal", { tier: difficultyTier });
   }
 
   async function handleRestartUnit() {
     setMenuOpen(false);
-    await loadBatch("practice");
+    await loadBatch("practice", { tier: difficultyTier });
   }
 
   function renderReadingLines(value: string, side: "left" | "right") {
@@ -747,7 +840,11 @@ function KanjiReadingQuizInner() {
       <main style={styles.page}>
         <div style={styles.centerWrap}>
           <div style={styles.messageCard}>
-            <h2 style={styles.messageTitle}>Ready to study?</h2>
+            <h2 style={styles.messageTitle}>
+              {difficultyTier === "high_level"
+                ? "Ready for Advanced Reading?"
+                : "Ready to study?"}
+            </h2>
             <p style={styles.messageText}>
               Unit: <strong>{unit}</strong>
             </p>
@@ -768,6 +865,57 @@ function KanjiReadingQuizInner() {
               >
                 Start from beginning
               </button>
+
+              {difficultyTier === "normal" && startMeta.hasAdvancedAvailable ? (
+                <button
+                  type="button"
+                  onClick={handleTryAdvancedReading}
+                  style={styles.advancedButton}
+                >
+                  Try Advanced Reading
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (showUnitComplete) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.centerWrap}>
+          <div style={styles.messageCard}>
+            <h2 style={styles.messageTitle}>Congratulations!</h2>
+            <p style={styles.messageText}>You finished this unit!</p>
+
+            <div style={styles.completeButtons}>
+              <button
+                type="button"
+                onClick={goHome}
+                style={styles.primaryButton}
+              >
+                Back to Home
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartFromBeginningFromStartScreen}
+                style={styles.secondaryButton}
+              >
+                Start from beginning
+              </button>
+
+              {difficultyTier === "normal" && startMeta.hasAdvancedAvailable ? (
+                <button
+                  type="button"
+                  onClick={handleTryAdvancedReading}
+                  style={styles.advancedButton}
+                >
+                  Try Advanced Reading
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -931,7 +1079,9 @@ function KanjiReadingQuizInner() {
               textAlign: "right",
             }}
           >
-            Kanji Reading Quiz
+            {difficultyTier === "high_level"
+              ? "Advanced Reading Quiz"
+              : "Kanji Reading Quiz"}
           </div>
 
           <div ref={menuRef} style={styles.menuWrapInline}>
@@ -1033,7 +1183,9 @@ function KanjiReadingQuizInner() {
                   lineHeight: isDesktop ? 1.03 : 1.06,
                 }}
               >
-                CAN YOU READ THIS KANJI?
+                {difficultyTier === "high_level"
+                  ? "ADVANCED READING"
+                  : "CAN YOU READ THIS KANJI?"}
               </div>
               <div
                 style={{
@@ -1041,7 +1193,9 @@ function KanjiReadingQuizInner() {
                   fontSize: isDesktop ? 22 : isTablet ? 18 : 15,
                 }}
               >
-                〜この漢字、読めるかな？〜
+                {difficultyTier === "high_level"
+                  ? "〜むずかしい読みクイズ〜"
+                  : "〜この漢字、読めるかな？〜"}
               </div>
             </div>
 
@@ -2373,6 +2527,16 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 999,
     background: "#dcdcdc",
     color: "#111",
+    padding: "12px 22px",
+    fontSize: 17,
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  advancedButton: {
+    border: "none",
+    borderRadius: 999,
+    background: "#d92d20",
+    color: "#fff",
     padding: "12px 22px",
     fontSize: 17,
     fontWeight: 900,
