@@ -549,8 +549,7 @@ export async function GET(request: NextRequest) {
 
       const orderedRows = unitPool
         .filter(
-          (row) =>
-            row.order_in_unit !== null && row.order_in_unit >= startOrder
+          (row) => row.order_in_unit !== null && row.order_in_unit >= startOrder
         )
         .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
         .slice(0, QUESTION_LIMIT);
@@ -591,27 +590,15 @@ export async function GET(request: NextRequest) {
     let orderedRows = activePool
       .filter(
         (row) =>
-          row.order_in_unit !== null &&
-          row.order_in_unit > activeLastOrderCompleted
+          row.order_in_unit !== null && row.order_in_unit > activeLastOrderCompleted
       )
       .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
       .slice(0, QUESTION_LIMIT);
 
-    if (orderedRows.length === 0 && lockedToUnit) {
-      return NextResponse.json({
-        account: {
-          display_name: account.display_name,
-          student_login_id: account.student_login_id,
-        },
-        unit: activeUnit,
-        lastOrderCompleted: activeLastOrderCompleted,
-        mode,
-        lockedToUnit,
-        finished: true,
-        isUnitComplete: true,
-        questions: [],
-      });
-    }
+    // NOTE:
+    // We intentionally do NOT reset progress here when lockedToUnit is true.
+    // Resetting student_kanji_progress to 0/false was the reason CLEAR stamps
+    // disappeared on the Home screen after finishing a unit.
 
     if (orderedRows.length === 0 && !lockedToUnit) {
       const { data: nextUnitRowRaw, error: nextUnitError } = await db
@@ -682,6 +669,7 @@ export async function GET(request: NextRequest) {
     }
 
     const sourceRows = shuffleArray(orderedRows);
+    const isUnitComplete = sourceRows.length === 0;
 
     return NextResponse.json({
       account: {
@@ -692,8 +680,8 @@ export async function GET(request: NextRequest) {
       lastOrderCompleted: activeLastOrderCompleted,
       mode,
       lockedToUnit,
-      finished: sourceRows.length === 0,
-      isUnitComplete: sourceRows.length === 0,
+      finished: isUnitComplete,
+      isUnitComplete,
       questions: makeQuizItems(sourceRows, activePool),
     });
   } catch (error) {
@@ -804,6 +792,30 @@ export async function POST(request: NextRequest) {
           currentUnit: unit,
           newLastOrderCompleted,
         });
+      } else {
+        const unitPool = await fetchKanjiPool(db, unit);
+        const hasRemaining = unitPool.some(
+          (row) => (row.order_in_unit ?? 0) > newLastOrderCompleted
+        );
+
+        if (!hasRemaining) {
+          const { error: completeProgressError } = await db
+            .from("student_kanji_progress")
+            .upsert({
+              student_account_id: account.id,
+              unit,
+              last_order_completed: newLastOrderCompleted,
+              last_studied_at: new Date().toISOString(),
+              is_completed: true,
+            });
+
+          if (completeProgressError) {
+            return NextResponse.json(
+              { error: completeProgressError.message },
+              { status: 400 }
+            );
+          }
+        }
       }
     }
 
