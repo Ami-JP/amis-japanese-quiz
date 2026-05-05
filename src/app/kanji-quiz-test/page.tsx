@@ -368,44 +368,7 @@ function KanjiQuizTestInner() {
       const ok = await saveSetOnly();
       if (!ok) return;
 
-      const params = new URLSearchParams();
-      params.set("mode", "normal");
-      if (requestedUnit) {
-        params.set("unit", requestedUnit);
-      } else if (batch?.unit) {
-        params.set("unit", batch.unit);
-      }
-
-      const checkRes = await fetch(`/api/kanji-quiz-test?${params.toString()}`, {
-        method: "GET",
-        credentials: "include",
-      });
-
-      if (checkRes.ok) {
-        const checkData = await checkRes.json();
-        if (checkData.isUnitComplete === true) {
-          setShowUnitComplete(true);
-          return;
-        }
-      }
-
-      openSetCompleteScreen();
-      return;
-    }
-
-    if (phase === "review") {
-      const nextQueue = wasCorrect ? reviewQueue.slice(1) : reviewQueue;
-
-      if (wasCorrect) {
-        setReviewQueue(nextQueue);
-      }
-
-      resetQuestionState();
-
-      if (nextQueue.length === 0 && wasCorrect) {
-        const ok = await saveSetOnly();
-        if (!ok) return;
-
+      if (quizMode === "normal") {
         const params = new URLSearchParams();
         params.set("mode", "normal");
         if (requestedUnit) {
@@ -426,6 +389,24 @@ function KanjiQuizTestInner() {
             return;
           }
         }
+      }
+
+      openSetCompleteScreen();
+      return;
+    }
+
+    if (phase === "review") {
+      const nextQueue = wasCorrect ? reviewQueue.slice(1) : reviewQueue;
+
+      if (wasCorrect) {
+        setReviewQueue(nextQueue);
+      }
+
+      resetQuestionState();
+
+      if (nextQueue.length === 0 && wasCorrect) {
+        const ok = await saveSetOnly();
+        if (!ok) return;
 
         openSetCompleteScreen();
       }
