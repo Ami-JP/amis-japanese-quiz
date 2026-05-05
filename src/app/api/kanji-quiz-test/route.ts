@@ -348,6 +348,13 @@ function getLatestWrongKanji(attempts: AttemptHistoryRow[]) {
     .map((row) => row.kanji);
 }
 
+function getMaxAttemptOrder(attempts: AttemptRow[]) {
+  return attempts.reduce((max, item) => {
+    const order = Number(item.order_in_unit) || 0;
+    return order > max ? order : max;
+  }, 0);
+}
+
 async function getLoggedInAccount(db: any) {
   const session = await getStudentSession();
 
@@ -750,8 +757,12 @@ export async function POST(request: NextRequest) {
 
     const progress = await getCurrentProgress(db, account.id, unit);
     const currentLastOrderCompleted = progress?.last_order_completed ?? 0;
+    const maxAttemptOrder = getMaxAttemptOrder(attempts);
+
     const newLastOrderCompleted =
-      currentLastOrderCompleted + Math.max(advanceCount, 0);
+      maxAttemptOrder > 0
+        ? Math.max(currentLastOrderCompleted, maxAttemptOrder)
+        : currentLastOrderCompleted + Math.max(advanceCount, 0);
 
     const progressRow = {
       student_account_id: account.id,
