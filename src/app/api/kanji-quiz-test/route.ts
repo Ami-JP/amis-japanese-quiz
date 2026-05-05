@@ -549,7 +549,8 @@ export async function GET(request: NextRequest) {
 
       const orderedRows = unitPool
         .filter(
-          (row) => row.order_in_unit !== null && row.order_in_unit >= startOrder
+          (row) =>
+            row.order_in_unit !== null && row.order_in_unit >= startOrder
         )
         .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
         .slice(0, QUESTION_LIMIT);
@@ -590,15 +591,11 @@ export async function GET(request: NextRequest) {
     let orderedRows = activePool
       .filter(
         (row) =>
-          row.order_in_unit !== null && row.order_in_unit > activeLastOrderCompleted
+          row.order_in_unit !== null &&
+          row.order_in_unit > activeLastOrderCompleted
       )
       .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
       .slice(0, QUESTION_LIMIT);
-
-    // NOTE:
-    // We intentionally do NOT reset progress here when lockedToUnit is true.
-    // Resetting student_kanji_progress to 0/false was the reason CLEAR stamps
-    // disappeared on the Home screen after finishing a unit.
 
     if (orderedRows.length === 0 && !lockedToUnit) {
       const { data: nextUnitRowRaw, error: nextUnitError } = await db
@@ -669,7 +666,6 @@ export async function GET(request: NextRequest) {
     }
 
     const sourceRows = shuffleArray(orderedRows);
-    const isUnitComplete = sourceRows.length === 0;
 
     return NextResponse.json({
       account: {
@@ -680,8 +676,8 @@ export async function GET(request: NextRequest) {
       lastOrderCompleted: activeLastOrderCompleted,
       mode,
       lockedToUnit,
-      finished: isUnitComplete,
-      isUnitComplete,
+      finished: sourceRows.length === 0,
+      isUnitComplete: sourceRows.length === 0,
       questions: makeQuizItems(sourceRows, activePool),
     });
   } catch (error) {
@@ -741,46 +737,73 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (mode === "normal") {
-      if (!unit) {
-        return NextResponse.json(
-          { error: "unit is required." },
-          { status: 400 }
-        );
-      }
+    if (mode !== "normal") {
+      return NextResponse.json({ ok: true });
+    }
 
-      const progress = await getCurrentProgress(db, account.id, unit);
+    if (!unit) {
+      return NextResponse.json(
+        { error: "unit is required." },
+        { status: 400 }
+      );
+    }
 
-      const newLastOrderCompleted =
-        (progress?.last_order_completed ?? 0) + advanceCount;
+    const progress = await getCurrentProgress(db, account.id, unit);
+    const currentLastOrderCompleted = progress?.last_order_completed ?? 0;
+    const newLastOrderCompleted =
+      currentLastOrderCompleted + Math.max(advanceCount, 0);
 
-      const progressRow = {
+    const progressRow = {
+      student_account_id: account.id,
+      unit,
+      last_order_completed: newLastOrderCompleted,
+      last_studied_at: new Date().toISOString(),
+      is_completed: false,
+    };
+
+    const { error: progressError } = await db
+      .from("student_kanji_progress")
+      .upsert(progressRow);
+
+    if (progressError) {
+      return NextResponse.json(
+        { error: progressError.message },
+        { status: 400 }
+      );
+    }
+
+    const { count: remainingCount, error: remainingError } = await db
+      .from("kanji_hints")
+      .select("*", { count: "exact", head: true })
+      .eq("unit", unit)
+      .eq("is_published", true)
+      .gt("order_in_unit", newLastOrderCompleted);
+
+    if (remainingError) {
+      return NextResponse.json(
+        { error: remainingError.message },
+        { status: 400 }
+      );
+    }
+
+    const hasRemaining = (remainingCount ?? 0) > 0;
+
+    if (!hasRemaining) {
+      const completeRow = {
         student_account_id: account.id,
         unit,
         last_order_completed: newLastOrderCompleted,
         last_studied_at: new Date().toISOString(),
-        is_completed: false,
+        is_completed: true,
       };
 
-      const { error: upsertError } = await db
+      const { error: completeError } = await db
         .from("student_kanji_progress")
-        .upsert(progressRow);
+        .upsert(completeRow);
 
-      if (upsertError) {
+      if (completeError) {
         return NextResponse.json(
-          { error: upsertError.message },
-          { status: 400 }
-        );
-      }
-
-      const { error: updateCurrentUnitError } = await db
-        .from("student_accounts")
-        .update({ current_unit: unit })
-        .eq("id", account.id);
-
-      if (updateCurrentUnitError) {
-        return NextResponse.json(
-          { error: updateCurrentUnitError.message },
+          { error: completeError.message },
           { status: 400 }
         );
       }
@@ -792,30 +815,6 @@ export async function POST(request: NextRequest) {
           currentUnit: unit,
           newLastOrderCompleted,
         });
-      } else {
-        const unitPool = await fetchKanjiPool(db, unit);
-        const hasRemaining = unitPool.some(
-          (row) => (row.order_in_unit ?? 0) > newLastOrderCompleted
-        );
-
-        if (!hasRemaining) {
-          const { error: completeProgressError } = await db
-            .from("student_kanji_progress")
-            .upsert({
-              student_account_id: account.id,
-              unit,
-              last_order_completed: newLastOrderCompleted,
-              last_studied_at: new Date().toISOString(),
-              is_completed: true,
-            });
-
-          if (completeProgressError) {
-            return NextResponse.json(
-              { error: completeProgressError.message },
-              { status: 400 }
-            );
-          }
-        }
       }
     }
 
