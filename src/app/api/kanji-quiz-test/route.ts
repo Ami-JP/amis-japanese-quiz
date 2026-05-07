@@ -19,6 +19,7 @@ type StudentProgress = {
   last_order_completed: number;
   last_studied_at: string | null;
   is_completed: boolean;
+  completed_count: number;
 };
 
 type KanjiHintRow = {
@@ -225,7 +226,7 @@ async function getCurrentProgress(db: any, accountId: string, unit: string) {
   const { data, error } = await db
     .from("student_kanji_progress")
     .select(
-      "student_account_id, unit, last_order_completed, last_studied_at, is_completed"
+      "student_account_id, unit, last_order_completed, last_studied_at, is_completed, completed_count"
     )
     .eq("student_account_id", accountId)
     .eq("unit", unit)
@@ -260,22 +261,6 @@ async function moveToNextUnitIfNeeded(params: {
 
   if ((remainingCount ?? 0) > 0) {
     return { nextUnit: null };
-  }
-
-  const completeProgressRow = {
-    student_account_id: accountId,
-    unit: currentUnit,
-    last_order_completed: newLastOrderCompleted,
-    last_studied_at: new Date().toISOString(),
-    is_completed: true,
-  };
-
-  const { error: completeProgressError } = await db
-    .from("student_kanji_progress")
-    .upsert(completeProgressRow);
-
-  if (completeProgressError) {
-    throw new Error(completeProgressError.message);
   }
 
   const { data: nextUnitRowRaw, error: nextUnitError } = await db
@@ -314,6 +299,7 @@ async function moveToNextUnitIfNeeded(params: {
     last_order_completed: 0,
     last_studied_at: null,
     is_completed: false,
+    completed_count: 0,
   };
 
   const { error: nextProgressError } = await db
@@ -415,14 +401,14 @@ export async function GET(request: NextRequest) {
         | "practice-set") ?? "normal";
 
     const requestedUnit = normalizeText(request.nextUrl.searchParams.get("unit"));
+    const startFromBeginning =
+      request.nextUrl.searchParams.get("startFromBeginning") === "1";
     const startOrderParam = Number(
       request.nextUrl.searchParams.get("startOrder") ?? 0
     );
     const endOrderParam = Number(
       request.nextUrl.searchParams.get("endOrder") ?? 0
     );
-    const startFromBeginning =
-      request.nextUrl.searchParams.get("startFromBeginning") === "1";
 
     const { account, errorResponse } = await getLoggedInAccount(db);
     if (!account) {
@@ -468,9 +454,11 @@ export async function GET(request: NextRequest) {
           },
           unit: account.current_unit ?? "",
           lastOrderCompleted: progress?.last_order_completed ?? 0,
+          completedCount: progress?.completed_count ?? 0,
           mode,
           lockedToUnit: false,
           finished: true,
+          isUnitComplete: false,
           questions: [],
         });
       }
@@ -491,9 +479,11 @@ export async function GET(request: NextRequest) {
         },
         unit: account.current_unit ?? sourceRows[0]?.unit ?? "",
         lastOrderCompleted: progress?.last_order_completed ?? 0,
+        completedCount: progress?.completed_count ?? 0,
         mode,
         lockedToUnit: false,
         finished: sourceRows.length === 0,
+        isUnitComplete: false,
         questions: makeQuizItems(sourceRows, globalPool),
       });
     }
@@ -532,9 +522,11 @@ export async function GET(request: NextRequest) {
         },
         unit,
         lastOrderCompleted: progress?.last_order_completed ?? 0,
+        completedCount: progress?.completed_count ?? 0,
         mode,
         lockedToUnit: true,
         finished: sourceRows.length === 0,
+        isUnitComplete: false,
         questions: makeQuizItems(sourceRows, unitPool),
       });
     }
@@ -551,9 +543,41 @@ export async function GET(request: NextRequest) {
 
     let activePool = await fetchKanjiPool(db, activeUnit);
     let progress = await getCurrentProgress(db, account.id, activeUnit);
-    let activeLastOrderCompleted = startFromBeginning
-      ? 0
-      : progress?.last_order_completed ?? 0;
+
+    if (startFromBeginning && requestedUnit) {
+      const preservedCompletedCount = progress?.completed_count ?? 0;
+
+      const resetProgressRow = {
+        student_account_id: account.id,
+        unit: activeUnit,
+        last_order_completed: 0,
+        last_studied_at: new Date().toISOString(),
+        is_completed: false,
+        completed_count: preservedCompletedCount,
+      };
+
+      const { error: resetProgressError } = await db
+        .from("student_kanji_progress")
+        .upsert(resetProgressRow);
+
+      if (resetProgressError) {
+        return NextResponse.json(
+          { error: resetProgressError.message },
+          { status: 400 }
+        );
+      }
+
+      progress = {
+        student_account_id: account.id,
+        unit: activeUnit,
+        last_order_completed: 0,
+        last_studied_at: resetProgressRow.last_studied_at,
+        is_completed: false,
+        completed_count: preservedCompletedCount,
+      };
+    }
+
+    let activeLastOrderCompleted = progress?.last_order_completed ?? 0;
 
     let orderedRows = activePool
       .filter(
@@ -604,6 +628,7 @@ export async function GET(request: NextRequest) {
           last_order_completed: 0,
           last_studied_at: null,
           is_completed: false,
+          completed_count: 0,
         };
 
         const { error: upsertNextProgressError } = await db
@@ -641,9 +666,11 @@ export async function GET(request: NextRequest) {
       },
       unit: activeUnit,
       lastOrderCompleted: activeLastOrderCompleted,
+      completedCount: progress?.completed_count ?? 0,
       mode,
       lockedToUnit,
       finished: sourceRows.length === 0,
+      isUnitComplete: sourceRows.length === 0,
       questions: makeQuizItems(sourceRows, activePool),
     });
   } catch (error) {
@@ -671,6 +698,10 @@ export async function POST(request: NextRequest) {
         | "practice-set") ?? "normal";
     const attempts = (body.attempts ?? []) as AttemptRow[];
     const lockToUnit = body.lockToUnit === true;
+    const baseLastOrderCompleted =
+      typeof body.baseLastOrderCompleted === "number"
+        ? body.baseLastOrderCompleted
+        : null;
 
     const { account, errorResponse } = await getLoggedInAccount(db);
     if (!account) {
@@ -702,98 +733,115 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (mode === "normal") {
-      if (!unit) {
-        return NextResponse.json(
-          { error: "unit is required." },
-          { status: 400 }
-        );
-      }
+    if (mode !== "normal") {
+      return NextResponse.json({ ok: true });
+    }
 
-      const progress = await getCurrentProgress(db, account.id, unit);
-      const currentLastOrderCompleted = progress?.last_order_completed ?? 0;
-      const maxAttemptOrder = getMaxAttemptOrder(attempts);
+    if (!unit) {
+      return NextResponse.json(
+        { error: "unit is required." },
+        { status: 400 }
+      );
+    }
 
-      const newLastOrderCompleted =
-        maxAttemptOrder > 0
-          ? maxAttemptOrder
-          : currentLastOrderCompleted + Math.max(advanceCount, 0);
+    const progress = await getCurrentProgress(db, account.id, unit);
 
-      const progressRow = {
+    const currentLastOrderCompleted =
+      baseLastOrderCompleted ?? progress?.last_order_completed ?? 0;
+
+    const maxAttemptOrder = getMaxAttemptOrder(attempts);
+
+    const newLastOrderCompleted =
+      maxAttemptOrder > 0
+        ? Math.max(currentLastOrderCompleted, maxAttemptOrder)
+        : currentLastOrderCompleted + Math.max(advanceCount, 0);
+
+    const currentCompletedCount = progress?.completed_count ?? 0;
+
+    const currentRunWasAlreadyComplete =
+      (progress?.is_completed ?? false) === true &&
+      (progress?.last_order_completed ?? 0) === currentLastOrderCompleted;
+
+    const baseProgressRow = {
+      student_account_id: account.id,
+      unit,
+      last_order_completed: newLastOrderCompleted,
+      last_studied_at: new Date().toISOString(),
+      is_completed: false,
+      completed_count: currentCompletedCount,
+    };
+
+    const { error: progressError } = await db
+      .from("student_kanji_progress")
+      .upsert(baseProgressRow);
+
+    if (progressError) {
+      return NextResponse.json(
+        { error: progressError.message },
+        { status: 400 }
+      );
+    }
+
+    const { error: updateCurrentUnitError } = await db
+      .from("student_accounts")
+      .update({ current_unit: unit })
+      .eq("id", account.id);
+
+    if (updateCurrentUnitError) {
+      return NextResponse.json(
+        { error: updateCurrentUnitError.message },
+        { status: 400 }
+      );
+    }
+
+    const { count: remainingCount, error: remainingError } = await db
+      .from("kanji_hints")
+      .select("*", { count: "exact", head: true })
+      .eq("unit", unit)
+      .eq("is_published", true)
+      .gt("order_in_unit", newLastOrderCompleted);
+
+    if (remainingError) {
+      return NextResponse.json(
+        { error: remainingError.message },
+        { status: 400 }
+      );
+    }
+
+    const hasRemaining = (remainingCount ?? 0) > 0;
+
+    if (!hasRemaining) {
+      const nextCompletedCount = currentRunWasAlreadyComplete
+        ? currentCompletedCount
+        : currentCompletedCount + 1;
+
+      const completeRow = {
         student_account_id: account.id,
         unit,
         last_order_completed: newLastOrderCompleted,
         last_studied_at: new Date().toISOString(),
-        is_completed: false,
+        is_completed: true,
+        completed_count: nextCompletedCount,
       };
 
-      const { error: upsertError } = await db
+      const { error: completeError } = await db
         .from("student_kanji_progress")
-        .upsert(progressRow);
+        .upsert(completeRow);
 
-      if (upsertError) {
+      if (completeError) {
         return NextResponse.json(
-          { error: upsertError.message },
+          { error: completeError.message },
           { status: 400 }
         );
       }
 
-      const { error: updateCurrentUnitError } = await db
-        .from("student_accounts")
-        .update({ current_unit: unit })
-        .eq("id", account.id);
-
-      if (updateCurrentUnitError) {
-        return NextResponse.json(
-          { error: updateCurrentUnitError.message },
-          { status: 400 }
-        );
-      }
-
-      const { count: remainingCount, error: remainingError } = await db
-        .from("kanji_hints")
-        .select("*", { count: "exact", head: true })
-        .eq("unit", unit)
-        .eq("is_published", true)
-        .gt("order_in_unit", newLastOrderCompleted);
-
-      if (remainingError) {
-        return NextResponse.json(
-          { error: remainingError.message },
-          { status: 400 }
-        );
-      }
-
-      const hasRemaining = (remainingCount ?? 0) > 0;
-
-      if (!hasRemaining) {
-        const completeRow = {
-          student_account_id: account.id,
-          unit,
-          last_order_completed: newLastOrderCompleted,
-          last_studied_at: new Date().toISOString(),
-          is_completed: true,
-        };
-
-        const { error: completeError } = await db
-          .from("student_kanji_progress")
-          .upsert(completeRow);
-
-        if (completeError) {
-          return NextResponse.json(
-            { error: completeError.message },
-            { status: 400 }
-          );
-        }
-
-        if (!lockToUnit) {
-          await moveToNextUnitIfNeeded({
-            supabase,
-            accountId: account.id,
-            currentUnit: unit,
-            newLastOrderCompleted,
-          });
-        }
+      if (!lockToUnit) {
+        await moveToNextUnitIfNeeded({
+          supabase,
+          accountId: account.id,
+          currentUnit: unit,
+          newLastOrderCompleted,
+        });
       }
     }
 

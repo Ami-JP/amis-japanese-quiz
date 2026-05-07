@@ -47,6 +47,7 @@ type ReadingProgress = {
   last_order_completed: number;
   last_studied_at: string | null;
   is_completed: boolean;
+  completed_count: number;
 };
 
 type AttemptRow = {
@@ -74,6 +75,7 @@ type ReadingHistoryRow = {
   correct_count: number;
   wrong_count: number;
   last_shown_at: string | null;
+  needs_review: boolean;
 };
 
 function getSupabase() {
@@ -107,6 +109,24 @@ function normalizeNumber(value: unknown): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
+function normalizeDifficultyTier(value: unknown): string {
+  const text = normalizeText(value).toLowerCase();
+  return text || "normal";
+}
+
+function questionIdKey(id: string | number | null) {
+  return normalizeText(id);
+}
+
+function pickString(row: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    const text = normalizeText(value);
+    if (text) return text;
+  }
+  return "";
+}
+
 function parseLooseJsonArray(value: unknown): string[] {
   if (value == null) return [];
 
@@ -137,6 +157,7 @@ function parseLooseJsonArray(value: unknown): string[] {
               normalizeText(obj.text) ||
               normalizeText(obj.word) ||
               normalizeText(obj.kanji);
+
             const itemRuby =
               normalizeText(obj.ruby) ||
               normalizeText(obj.reading) ||
@@ -156,54 +177,6 @@ function parseLooseJsonArray(value: unknown): string[] {
     .split(/[、,\n]/)
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function parseRubyAnnotations(value: unknown): RubyAnnotationItem[] {
-  if (value == null) return [];
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => {
-        if (typeof item === "string") {
-          return parseRubyAnnotationStringItem(item);
-        }
-
-        if (item && typeof item === "object") {
-          const obj = item as Record<string, unknown>;
-          const text =
-            normalizeText(obj.text) ||
-            normalizeText(obj.word) ||
-            normalizeText(obj.kanji);
-          const ruby =
-            normalizeText(obj.ruby) ||
-            normalizeText(obj.reading) ||
-            normalizeText(obj.furigana);
-
-          if (!text) return null;
-          return { text, ruby };
-        }
-
-        return null;
-      })
-      .filter((item): item is RubyAnnotationItem => item !== null);
-  }
-
-  if (typeof value === "string") {
-    const raw = value.trim();
-    if (!raw || raw === "null") return [];
-
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parseRubyAnnotations(parsed);
-    } catch {}
-
-    return raw
-      .split(/[、,\n]/)
-      .map((item) => parseRubyAnnotationStringItem(item))
-      .filter((item): item is RubyAnnotationItem => item !== null);
-  }
-
-  return [];
 }
 
 function parseRubyAnnotationStringItem(value: string): RubyAnnotationItem | null {
@@ -230,31 +203,54 @@ function parseRubyAnnotationStringItem(value: string): RubyAnnotationItem | null
   };
 }
 
-function normalizeDifficultyTier(value: unknown): string {
-  const text = normalizeText(value).toLowerCase();
-  return text || "normal";
-}
+function parseRubyAnnotations(value: unknown): RubyAnnotationItem[] {
+  if (value == null) return [];
 
-function shuffleArray<T>(items: T[]) {
-  const array = [...items];
-  for (let i = array.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") {
+          return parseRubyAnnotationStringItem(item);
+        }
+
+        if (item && typeof item === "object") {
+          const obj = item as Record<string, unknown>;
+          const text =
+            normalizeText(obj.text) ||
+            normalizeText(obj.word) ||
+            normalizeText(obj.kanji);
+
+          const ruby =
+            normalizeText(obj.ruby) ||
+            normalizeText(obj.reading) ||
+            normalizeText(obj.furigana);
+
+          if (!text) return null;
+
+          return { text, ruby };
+        }
+
+        return null;
+      })
+      .filter((item): item is RubyAnnotationItem => item !== null);
   }
-  return array;
-}
 
-function pickString(row: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = row[key];
-    const text = normalizeText(value);
-    if (text) return text;
+  if (typeof value === "string") {
+    const raw = value.trim();
+    if (!raw || raw === "null") return [];
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parseRubyAnnotations(parsed);
+    } catch {}
+
+    return raw
+      .split(/[、,\n]/)
+      .map((item) => parseRubyAnnotationStringItem(item))
+      .filter((item): item is RubyAnnotationItem => item !== null);
   }
-  return "";
-}
 
-function questionIdKey(id: string | number | null) {
-  return normalizeText(id);
+  return [];
 }
 
 async function getLoggedInAccount(db: any) {
@@ -310,7 +306,7 @@ async function getReadingProgress(
   const { data, error } = await db
     .from("student_reading_progress")
     .select(
-      "student_account_id, unit, difficulty_tier, last_order_completed, last_studied_at, is_completed"
+      "student_account_id, unit, difficulty_tier, last_order_completed, last_studied_at, is_completed, completed_count"
     )
     .eq("student_account_id", studentAccountId)
     .eq("unit", unit)
@@ -323,7 +319,6 @@ async function getReadingProgress(
 
   return (data ?? null) as ReadingProgress | null;
 }
-
 
 async function hasAdvancedReadingQuestions(db: any, unit: string) {
   const { count, error } = await db
@@ -338,13 +333,6 @@ async function hasAdvancedReadingQuestions(db: any, unit: string) {
   }
 
   return (count ?? 0) > 0;
-}
-
-function getMaxAttemptOrder(attempts: AttemptRow[]) {
-  return attempts.reduce((max, item) => {
-    const order = normalizeNumber(item.order_in_unit) ?? 0;
-    return order > max ? order : max;
-  }, 0);
 }
 
 async function fetchQuestionPool(
@@ -385,9 +373,9 @@ async function fetchQuestionPool(
     )
     .eq("unit", unit)
     .eq("is_published", true)
+    .order("order_in_unit", { ascending: true })
     .order("kanji_order_in_unit", { ascending: true, nullsFirst: false })
-    .order("reading_variant_order", { ascending: true, nullsFirst: false })
-    .order("order_in_unit", { ascending: true });
+    .order("reading_variant_order", { ascending: true, nullsFirst: false });
 
   if (error) {
     throw new Error(error.message);
@@ -430,7 +418,9 @@ async function fetchReadingHistoryMap(
 
   const { data, error } = await db
     .from("student_reading_question_history")
-    .select("question_id, shown_count, correct_count, wrong_count, last_shown_at")
+    .select(
+      "question_id, shown_count, correct_count, wrong_count, last_shown_at, needs_review"
+    )
     .eq("student_account_id", studentAccountId)
     .in("question_id", questionIds);
 
@@ -444,6 +434,29 @@ async function fetchReadingHistoryMap(
     acc[String(row.question_id)] = row;
     return acc;
   }, {});
+}
+
+async function fetchNeedsReviewQuestionIds(
+  db: any,
+  studentAccountId: string,
+  unit: string
+) {
+  const { data, error } = await db
+    .from("student_reading_question_history")
+    .select("question_id, wrong_count, last_shown_at")
+    .eq("student_account_id", studentAccountId)
+    .eq("unit", unit)
+    .eq("needs_review", true)
+    .gt("wrong_count", 0)
+    .order("last_shown_at", { ascending: true, nullsFirst: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data ?? []) as { question_id: string }[])
+    .map((row) => normalizeText(row.question_id))
+    .filter(Boolean);
 }
 
 function chooseOneReadingPerKanji(
@@ -474,12 +487,10 @@ function chooseOneReadingPerKanji(
 
       const aShown = aHistory?.shown_count ?? 0;
       const bShown = bHistory?.shown_count ?? 0;
-
       if (aShown !== bShown) return aShown - bShown;
 
       const aWrong = aHistory?.wrong_count ?? 0;
       const bWrong = bHistory?.wrong_count ?? 0;
-
       if (aWrong !== bWrong) return bWrong - aWrong;
 
       const aLast = aHistory?.last_shown_at
@@ -488,12 +499,10 @@ function chooseOneReadingPerKanji(
       const bLast = bHistory?.last_shown_at
         ? new Date(bHistory.last_shown_at).getTime()
         : 0;
-
       if (aLast !== bLast) return aLast - bLast;
 
       const aVariant = normalizeNumber(a.reading_variant_order) ?? 999999;
       const bVariant = normalizeNumber(b.reading_variant_order) ?? 999999;
-
       if (aVariant !== bVariant) return aVariant - bVariant;
 
       return (
@@ -662,7 +671,8 @@ async function updateReadingQuestionHistory(
   db: any,
   studentAccountId: string,
   unit: string,
-  attempts: AttemptRow[]
+  attempts: AttemptRow[],
+  mode: string
 ) {
   if (attempts.length === 0) return;
 
@@ -675,7 +685,7 @@ async function updateReadingQuestionHistory(
     const { data: existing, error: fetchError } = await db
       .from("student_reading_question_history")
       .select(
-        "id, shown_count, correct_count, wrong_count, kanji_order_in_unit, reading_variant_order"
+        "id, shown_count, correct_count, wrong_count, kanji_order_in_unit, reading_variant_order, needs_review"
       )
       .eq("student_account_id", studentAccountId)
       .eq("question_id", questionId)
@@ -689,6 +699,16 @@ async function updateReadingQuestionHistory(
     const currentCorrect = existing?.correct_count ?? 0;
     const currentWrong = existing?.wrong_count ?? 0;
 
+    let nextNeedsReview = existing?.needs_review ?? false;
+
+    if (item.is_correct) {
+      if (mode === "review-wrong") {
+        nextNeedsReview = false;
+      }
+    } else {
+      nextNeedsReview = true;
+    }
+
     const row = {
       student_account_id: studentAccountId,
       question_id: questionId,
@@ -700,6 +720,7 @@ async function updateReadingQuestionHistory(
       shown_count: currentShown + 1,
       correct_count: currentCorrect + (item.is_correct ? 1 : 0),
       wrong_count: currentWrong + (item.is_correct ? 0 : 1),
+      needs_review: nextNeedsReview,
       last_shown_at: now,
       updated_at: now,
     };
@@ -716,6 +737,13 @@ async function updateReadingQuestionHistory(
   }
 }
 
+function getMaxAttemptOrder(attempts: AttemptRow[]) {
+  return attempts.reduce((max, item) => {
+    const order = normalizeNumber(item.order_in_unit) ?? 0;
+    return order > max ? order : max;
+  }, 0);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
@@ -729,7 +757,6 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get("tier")
     );
     const mode = normalizeText(request.nextUrl.searchParams.get("mode")) || "normal";
-
     const startOrder = normalizeNumber(request.nextUrl.searchParams.get("startOrder"));
     const endOrder = normalizeNumber(request.nextUrl.searchParams.get("endOrder"));
     const startFromBeginning =
@@ -739,8 +766,51 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "unit is required." }, { status: 400 });
     }
 
-    const advancedAvailable = await hasAdvancedReadingQuestions(db, unit);
-    const pool = await fetchQuestionPool(db, unit, difficultyTier);
+    const [pool, advancedAvailable] = await Promise.all([
+      fetchQuestionPool(db, unit, difficultyTier),
+      hasAdvancedReadingQuestions(db, unit),
+    ]);
+
+    if (mode === "review-wrong") {
+      const reviewQuestionIds = await fetchNeedsReviewQuestionIds(
+        db,
+        account.id,
+        unit
+      );
+
+      const reviewIdSet = new Set(reviewQuestionIds);
+
+      const selectedRows = pool
+        .filter((row) => reviewIdSet.has(questionIdKey(row.id)))
+        .sort((a, b) => {
+          const aIndex = reviewQuestionIds.indexOf(questionIdKey(a.id));
+          const bIndex = reviewQuestionIds.indexOf(questionIdKey(b.id));
+          return aIndex - bIndex;
+        })
+        .slice(0, QUESTION_LIMIT);
+
+      const hintMap = await buildHintMapForRows(db, selectedRows);
+      const questions = selectedRows.map((row) => buildQuestionResponse(row, hintMap));
+
+      return NextResponse.json({
+        account: {
+          display_name: account.display_name,
+          student_login_id: account.student_login_id,
+        },
+        unit,
+        difficulty_tier: difficultyTier,
+        mode: "review-wrong",
+        startOrder: null,
+        endOrder: null,
+        lastOrderCompleted: 0,
+        completedCount: 0,
+        finished: questions.length === 0,
+        isUnitComplete: false,
+        hasAdvancedAvailable: advancedAvailable,
+        hasMoreReadingVariants: false,
+        questions,
+      });
+    }
 
     if (mode === "practice-set") {
       const practiceSetPool = filterPracticeSetPool(pool, startOrder, endOrder);
@@ -764,24 +834,87 @@ export async function GET(request: NextRequest) {
         startOrder,
         endOrder,
         lastOrderCompleted: 0,
+        completedCount: 0,
         finished: questions.length === 0,
         isUnitComplete: false,
         hasAdvancedAvailable: advancedAvailable,
-        hasMoreReadingVariants: hasMoreReadingVariants(
-          practiceSetPool,
-          selectedRows
-        ),
+        hasMoreReadingVariants: hasMoreReadingVariants(practiceSetPool, selectedRows),
         questions,
       });
     }
 
-    const progress = await getReadingProgress(db, account.id, unit, difficultyTier);
-    const lastOrderCompleted = startFromBeginning
-      ? 0
-      : progress?.last_order_completed ?? 0;
+    if (mode === "practice") {
+      const orderedRows = pool
+        .filter((row) => row.order_in_unit !== null && row.order_in_unit >= 1)
+        .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
+        .slice(0, QUESTION_LIMIT);
+
+      const hintMap = await buildHintMapForRows(db, orderedRows);
+      const questions = orderedRows.map((row) => buildQuestionResponse(row, hintMap));
+
+      return NextResponse.json({
+        account: {
+          display_name: account.display_name,
+          student_login_id: account.student_login_id,
+        },
+        unit,
+        difficulty_tier: difficultyTier,
+        mode: "practice",
+        startOrder: null,
+        endOrder: null,
+        lastOrderCompleted: 0,
+        completedCount: 0,
+        finished: questions.length === 0,
+        isUnitComplete: false,
+        hasAdvancedAvailable: advancedAvailable,
+        hasMoreReadingVariants: false,
+        questions,
+      });
+    }
+
+    let progress = await getReadingProgress(db, account.id, unit, difficultyTier);
+
+    if (startFromBeginning && difficultyTier === "normal") {
+      const preservedCompletedCount = progress?.completed_count ?? 0;
+      const now = new Date().toISOString();
+
+      const resetProgressRow = {
+        student_account_id: account.id,
+        unit,
+        difficulty_tier: difficultyTier,
+        last_order_completed: 0,
+        last_studied_at: now,
+        is_completed: false,
+        completed_count: preservedCompletedCount,
+      };
+
+      const { error: resetError } = await db
+        .from("student_reading_progress")
+        .upsert(resetProgressRow);
+
+      if (resetError) {
+        return NextResponse.json({ error: resetError.message }, { status: 400 });
+      }
+
+      progress = {
+        student_account_id: account.id,
+        unit,
+        difficulty_tier: difficultyTier,
+        last_order_completed: 0,
+        last_studied_at: now,
+        is_completed: false,
+        completed_count: preservedCompletedCount,
+      };
+    }
+
+    const lastOrderCompleted = progress?.last_order_completed ?? 0;
 
     const orderedRows = pool
-      .filter((row) => row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted)
+      .filter(
+        (row) =>
+          row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted
+      )
+      .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
       .slice(0, QUESTION_LIMIT);
 
     const hintMap = await buildHintMapForRows(db, orderedRows);
@@ -798,6 +931,7 @@ export async function GET(request: NextRequest) {
       startOrder: null,
       endOrder: null,
       lastOrderCompleted,
+      completedCount: progress?.completed_count ?? 0,
       finished: questions.length === 0,
       isUnitComplete: questions.length === 0,
       hasAdvancedAvailable: advancedAvailable,
@@ -824,8 +958,17 @@ export async function POST(request: NextRequest) {
     const unit = normalizeText(body.unit);
     const difficultyTier = normalizeDifficultyTier(body.difficulty_tier);
     const mode = normalizeText(body.mode) || "normal";
-    const attempts = Array.isArray(body.attempts) ? (body.attempts as AttemptRow[]) : [];
-    const advanceCount = typeof body.advanceCount === "number" ? body.advanceCount : 0;
+    const attempts = Array.isArray(body.attempts)
+      ? (body.attempts as AttemptRow[])
+      : [];
+
+    const advanceCount =
+      typeof body.advanceCount === "number" ? body.advanceCount : 0;
+
+    const baseLastOrderCompleted =
+      typeof body.baseLastOrderCompleted === "number"
+        ? body.baseLastOrderCompleted
+        : null;
 
     if (!unit) {
       return NextResponse.json({ error: "unit is required." }, { status: 400 });
@@ -852,57 +995,107 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: insertError.message }, { status: 400 });
       }
 
-      await updateReadingQuestionHistory(db, account.id, unit, attempts);
+      await updateReadingQuestionHistory(db, account.id, unit, attempts, mode);
     }
 
-    if (mode === "normal") {
-      const current = await getReadingProgress(db, account.id, unit, difficultyTier);
-      const maxAttemptOrder = getMaxAttemptOrder(attempts);
+    if (mode === "review-wrong") {
+      return NextResponse.json({
+        ok: true,
+        isUnitComplete: false,
+        completedCount: 0,
+        lastOrderCompleted: 0,
+      });
+    }
 
-      const newLastOrderCompleted =
-        maxAttemptOrder > 0
-          ? maxAttemptOrder
-          : (current?.last_order_completed ?? 0) + Math.max(advanceCount, 0);
+    if (mode !== "normal" && mode !== "practice") {
+      return NextResponse.json({
+        ok: true,
+        isUnitComplete: false,
+        completedCount: 0,
+        lastOrderCompleted: 0,
+      });
+    }
 
-      const progressRow = {
+    const progress = await getReadingProgress(db, account.id, unit, difficultyTier);
+
+    const currentLastOrderCompleted =
+      mode === "practice"
+        ? 0
+        : baseLastOrderCompleted ?? progress?.last_order_completed ?? 0;
+
+    const currentCompletedCount = progress?.completed_count ?? 0;
+    const maxAttemptOrder = getMaxAttemptOrder(attempts);
+
+    const newLastOrderCompleted =
+      maxAttemptOrder > 0
+        ? Math.max(currentLastOrderCompleted, maxAttemptOrder)
+        : currentLastOrderCompleted + Math.max(advanceCount, 0);
+
+    const currentRunWasAlreadyComplete =
+      (progress?.is_completed ?? false) === true &&
+      (progress?.last_order_completed ?? 0) === currentLastOrderCompleted;
+
+    const now = new Date().toISOString();
+
+    const baseProgressRow = {
+      student_account_id: account.id,
+      unit,
+      difficulty_tier: difficultyTier,
+      last_order_completed: newLastOrderCompleted,
+      last_studied_at: now,
+      is_completed: false,
+      completed_count: currentCompletedCount,
+    };
+
+    const { error: progressError } = await db
+      .from("student_reading_progress")
+      .upsert(baseProgressRow);
+
+    if (progressError) {
+      return NextResponse.json({ error: progressError.message }, { status: 400 });
+    }
+
+    const hasRemaining = (await fetchQuestionPool(db, unit, difficultyTier)).some(
+      (row) => (row.order_in_unit ?? 0) > newLastOrderCompleted
+    );
+
+    if (!hasRemaining) {
+      const nextCompletedCount = currentRunWasAlreadyComplete
+        ? currentCompletedCount
+        : currentCompletedCount + 1;
+
+      const completeRow = {
         student_account_id: account.id,
         unit,
         difficulty_tier: difficultyTier,
         last_order_completed: newLastOrderCompleted,
-        last_studied_at: new Date().toISOString(),
-        is_completed: false,
-        updated_at: new Date().toISOString(),
+        last_studied_at: now,
+        is_completed: true,
+        completed_count: nextCompletedCount,
       };
 
-      const { error: upsertError } = await db
+      const { error: completeError } = await db
         .from("student_reading_progress")
-        .upsert(progressRow);
+        .upsert(completeRow);
 
-      if (upsertError) {
-        return NextResponse.json({ error: upsertError.message }, { status: 400 });
+      if (completeError) {
+        return NextResponse.json({ error: completeError.message }, { status: 400 });
       }
 
-      const advancedAvailable = await hasAdvancedReadingQuestions(db, unit);
-    const pool = await fetchQuestionPool(db, unit, difficultyTier);
-      const hasRemaining = pool.some(
-        (row) => (row.order_in_unit ?? 0) > newLastOrderCompleted
-      );
-
-      if (!hasRemaining) {
-        const { error: completeError } = await db
-          .from("student_reading_progress")
-          .upsert({
-            ...progressRow,
-            is_completed: true,
-          });
-
-        if (completeError) {
-          return NextResponse.json({ error: completeError.message }, { status: 400 });
-        }
-      }
+      return NextResponse.json({
+        ok: true,
+        isUnitComplete: true,
+        completedCount: nextCompletedCount,
+        lastOrderCompleted: newLastOrderCompleted,
+      });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      isUnitComplete: false,
+      completedCount: currentCompletedCount,
+      lastOrderCompleted: newLastOrderCompleted,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },

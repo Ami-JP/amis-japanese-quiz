@@ -28,6 +28,7 @@ type BatchResponse = {
   lockedToUnit?: boolean;
   finished?: boolean;
   isUnitComplete?: boolean;
+  completedCount?: number;
   questions: QuizQuestion[];
 };
 
@@ -134,7 +135,6 @@ function KanjiQuizTestInner() {
       params.set("endOrder", String(practiceTarget.endOrder ?? 0));
     }
 
-
     if (mode === "normal" && options?.startFromBeginning) {
       params.set("startFromBeginning", "1");
     }
@@ -174,9 +174,10 @@ function KanjiQuizTestInner() {
     setAttempts([]);
     setQuizMode(mode);
     setShowSetComplete(false);
+    setShowUnitComplete(false);
 
     try {
-      let data = await fetchBatchOnce(mode, practiceTarget);
+      const data = await fetchBatchOnce(mode, practiceTarget, options);
       if (!data) return;
       setBatch(data);
     } catch (err) {
@@ -196,13 +197,27 @@ function KanjiQuizTestInner() {
           const data = await fetchBatchOnce("normal");
           if (!data) return;
           setBatch(data);
-          if (data.isUnitComplete === true && data.questions.length === 0) {
+
+          const completedCount = data.completedCount ?? 0;
+          const lastOrderCompleted = data.lastOrderCompleted ?? 0;
+          const isUnitComplete =
+            data.isUnitComplete === true && data.questions.length === 0;
+
+          if (isUnitComplete) {
             setShowUnitComplete(true);
             setShowUnitStartScreen(false);
-          } else if ((data.lastOrderCompleted ?? 0) > 0) {
+          } else if (completedCount === 0 && lastOrderCompleted === 0) {
+            setShowUnitStartScreen(false);
+            setShowUnitComplete(false);
+          } else if (lastOrderCompleted > 0) {
             setShowUnitStartScreen(true);
+            setShowUnitComplete(false);
+          } else if (completedCount >= 1 && lastOrderCompleted === 0) {
+            setShowUnitStartScreen(true);
+            setShowUnitComplete(false);
           } else {
             setShowUnitStartScreen(false);
+            setShowUnitComplete(false);
           }
         } catch (err) {
           setBatch(null);
@@ -242,6 +257,8 @@ function KanjiQuizTestInner() {
     if (phase === "main") return `${mainIndex + 1} / ${batch.questions.length}`;
     return `Review: ${reviewQueue.length} left`;
   }, [batch, mainIndex, phase, reviewQueue.length]);
+
+  const showContinueOnStartScreen = (batch?.lastOrderCompleted ?? 0) > 0;
 
   async function saveSetOnly() {
     if (!batch) return false;
@@ -325,7 +342,6 @@ function KanjiQuizTestInner() {
     setShowSetComplete(true);
   }
 
-
   async function handleAfterSave() {
     if (quizMode !== "normal") {
       openSetCompleteScreen();
@@ -355,6 +371,7 @@ function KanjiQuizTestInner() {
 
     openSetCompleteScreen();
   }
+
   async function handleNext() {
     if (!currentQuestion) return;
 
@@ -452,7 +469,6 @@ function KanjiQuizTestInner() {
     await loadBatch("normal");
   }
 
-
   function handleTryThisSetAgain() {
     setShowSetComplete(false);
     setPhase("main");
@@ -466,11 +482,14 @@ function KanjiQuizTestInner() {
 
   async function handleContinueRequestedUnit() {
     setShowUnitStartScreen(false);
+    setShowUnitComplete(false);
+    await loadBatch("normal");
   }
 
   async function handlePracticeRequestedUnit() {
     if (!requestedUnit) return;
     setShowUnitStartScreen(false);
+    setShowUnitComplete(false);
     await loadBatch("normal", null, {
       startFromBeginning: true,
     });
@@ -479,7 +498,6 @@ function KanjiQuizTestInner() {
   function handleFinishForToday() {
     window.location.href = "/student-home";
   }
-
 
   function getOptionStyle(option: QuizOption): React.CSSProperties {
     const selectedThis = selected === option.label;
@@ -537,10 +555,10 @@ function KanjiQuizTestInner() {
           <>
             <button
               type="button"
-              onClick={handleContinueRequestedUnit}
+              onClick={handleBackToHome}
               style={styles.emptyPrimaryButton}
             >
-              Continue
+              Go Back Home
             </button>
 
             <button
@@ -609,7 +627,6 @@ function KanjiQuizTestInner() {
     );
   }
 
-
   if (showUnitComplete) {
     return (
       <main style={styles.page}>
@@ -670,13 +687,23 @@ function KanjiQuizTestInner() {
                 flexDirection: isMobile ? "column" : "row",
               }}
             >
-              <button
-                type="button"
-                onClick={handleContinueRequestedUnit}
-                style={styles.emptyPrimaryButton}
-              >
-                Continue
-              </button>
+              {showContinueOnStartScreen ? (
+                <button
+                  type="button"
+                  onClick={handleContinueRequestedUnit}
+                  style={styles.emptyPrimaryButton}
+                >
+                  Continue
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleBackToHome}
+                  style={styles.emptyPrimaryButton}
+                >
+                  Back to Home
+                </button>
+              )}
 
               <button
                 type="button"
@@ -910,7 +937,6 @@ function KanjiQuizTestInner() {
                       right: 0,
                     }}
                   >
-
                     <button
                       type="button"
                       style={{

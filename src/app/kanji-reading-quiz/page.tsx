@@ -46,15 +46,25 @@ type BatchResponse = {
   };
   unit: string;
   difficulty_tier: string;
-  mode: "normal" | "practice-set";
+  mode: "normal" | "practice-set" | "review-wrong";
   startOrder?: number | null;
   endOrder?: number | null;
   lastOrderCompleted: number;
+  completedCount?: number;
   finished: boolean;
   isUnitComplete?: boolean;
   hasAdvancedAvailable?: boolean;
   hasMoreReadingVariants?: boolean;
   questions: ReadingQuestion[];
+  error?: string;
+};
+
+type SaveProgressResponse = {
+  ok: boolean;
+  isUnitComplete?: boolean;
+  completedCount?: number;
+  lastOrderCompleted?: number;
+  error?: string;
 };
 
 type AttemptRow = {
@@ -243,6 +253,7 @@ function KanjiReadingQuizInner() {
   const [checked, setChecked] = useState(false);
   const [wasCorrect, setWasCorrect] = useState<boolean | null>(null);
   const [showComplete, setShowComplete] = useState(false);
+  const [unitComplete, setUnitComplete] = useState(false);
 
   const [reviewQuestions, setReviewQuestions] = useState<
     ReadingQuestion[] | null
@@ -260,7 +271,11 @@ function KanjiReadingQuizInner() {
 
   async function loadBatch(
     mode: "normal" | "practice-set",
-    options?: { startOrder?: number | null; endOrder?: number | null; startFromBeginning?: boolean }
+    options?: {
+      startOrder?: number | null;
+      endOrder?: number | null;
+      startFromBeginning?: boolean;
+    }
   ) {
     if (!unit) {
       setError("unit is required in the URL.");
@@ -278,6 +293,7 @@ function KanjiReadingQuizInner() {
     setChecked(false);
     setWasCorrect(null);
     setShowComplete(false);
+    setUnitComplete(false);
     setShowFurigana(false);
     setShowEnglish(false);
     setShowHint(false);
@@ -310,7 +326,7 @@ function KanjiReadingQuizInner() {
       return;
     }
 
-    const data = await res.json();
+    const data = (await res.json()) as BatchResponse;
 
     if (!res.ok) {
       setError(data.error ?? "Failed to load quiz.");
@@ -332,6 +348,8 @@ function KanjiReadingQuizInner() {
       if (unit) {
         setLoading(true);
         setError("");
+        setUnitComplete(false);
+
         const params = new URLSearchParams();
         params.set("unit", unit);
         params.set("tier", difficultyTier);
@@ -346,7 +364,7 @@ function KanjiReadingQuizInner() {
           return;
         }
 
-        const data = await res.json();
+        const data = (await res.json()) as BatchResponse;
 
         if (!res.ok) {
           setError(data.error ?? "Failed to load quiz.");
@@ -359,7 +377,10 @@ function KanjiReadingQuizInner() {
         setStartScreenProgress(data.lastOrderCompleted ?? 0);
         setStartScreenHasAdvanced(data.hasAdvancedAvailable === true);
 
-        if (difficultyTier === "high_level" && (data.lastOrderCompleted ?? 0) === 0) {
+        if (
+          difficultyTier === "high_level" &&
+          (data.lastOrderCompleted ?? 0) === 0
+        ) {
           setShowUnitStartScreen(false);
         } else {
           setShowUnitStartScreen(true);
@@ -549,7 +570,7 @@ function KanjiReadingQuizInner() {
     }
 
     if (currentMode === "review") {
-      setShowComplete(true);
+      saveReviewProgress();
       return;
     }
 
@@ -573,6 +594,7 @@ function KanjiReadingQuizInner() {
         difficulty_tier: batch.difficulty_tier,
         mode: batch.mode,
         advanceCount: batch.mode === "normal" ? batch.questions.length : 0,
+        baseLastOrderCompleted: batch.lastOrderCompleted ?? 0,
         attempts,
       }),
     });
@@ -582,10 +604,70 @@ function KanjiReadingQuizInner() {
       return;
     }
 
-    const data = await res.json();
+    const data = (await res.json()) as SaveProgressResponse;
 
     if (!res.ok) {
       setError(data.error ?? "Failed to save progress.");
+      setSaving(false);
+      return;
+    }
+
+    const nextUnitComplete = data.isUnitComplete === true;
+
+    setUnitComplete(nextUnitComplete);
+
+    setBatch((prev) => {
+      if (!prev) return prev;
+
+      return {
+        ...prev,
+        lastOrderCompleted:
+          typeof data.lastOrderCompleted === "number"
+            ? data.lastOrderCompleted
+            : prev.lastOrderCompleted,
+        completedCount:
+          typeof data.completedCount === "number"
+            ? data.completedCount
+            : prev.completedCount,
+        isUnitComplete: nextUnitComplete,
+        finished: nextUnitComplete ? true : prev.finished,
+      };
+    });
+
+    setSaving(false);
+    setShowComplete(true);
+  }
+
+  async function saveReviewProgress() {
+    if (!batch) return;
+
+    setSaving(true);
+    setError("");
+
+    const res = await fetch("/api/kanji-reading-quiz", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        unit: batch.unit,
+        difficulty_tier: batch.difficulty_tier,
+        mode: "review-wrong",
+        advanceCount: 0,
+        attempts,
+      }),
+    });
+
+    if (res.status === 401) {
+      window.location.href = "/student-login";
+      return;
+    }
+
+    const data = (await res.json()) as SaveProgressResponse;
+
+    if (!res.ok) {
+      setError(data.error ?? "Failed to save review progress.");
       setSaving(false);
       return;
     }
@@ -594,27 +676,48 @@ function KanjiReadingQuizInner() {
     setShowComplete(true);
   }
 
-  function startWrongReview() {
+  async function startWrongReview() {
     if (!batch) return;
 
-    const wrongIds = attempts
-      .filter((item) => !item.is_correct)
-      .map((item) => item.question_id);
+    setMenuOpen(false);
+    setSaving(false);
+    setError("");
 
-    const uniqueWrongQuestions = batch.questions.filter((q) =>
-      wrongIds.includes(q.id)
-    );
+    const params = new URLSearchParams();
+    params.set("unit", batch.unit);
+    params.set("tier", batch.difficulty_tier);
+    params.set("mode", "review-wrong");
 
-    if (uniqueWrongQuestions.length === 0) return;
+    const res = await fetch(`/api/kanji-reading-quiz?${params.toString()}`, {
+      credentials: "include",
+    });
+
+    if (res.status === 401) {
+      window.location.href = "/student-login";
+      return;
+    }
+
+    const data = (await res.json()) as BatchResponse;
+
+    if (!res.ok) {
+      setError(data.error ?? "Failed to load review questions.");
+      return;
+    }
+
+    if (!data.questions || data.questions.length === 0) {
+      window.alert("No wrong answers to review right now!");
+      return;
+    }
 
     setCurrentMode("review");
-    setReviewQuestions(uniqueWrongQuestions);
+    setReviewQuestions(data.questions);
     setQuestionIndex(0);
     setAnswers([]);
     setAttempts([]);
     setChecked(false);
     setWasCorrect(null);
     setShowComplete(false);
+    setUnitComplete(false);
     setShowFurigana(false);
     setShowEnglish(false);
     setShowHint(false);
@@ -645,7 +748,6 @@ function KanjiReadingQuizInner() {
     window.location.href = "/student-home";
   }
 
-
   async function handlePracticeMoreReadings() {
     if (!batch) return;
     if (batch.mode !== "practice-set") return;
@@ -662,9 +764,9 @@ function KanjiReadingQuizInner() {
     await loadBatch("normal");
   }
 
-
   function handlePracticeThisSetAgain() {
     setShowComplete(false);
+    setUnitComplete(false);
     setReviewQuestions(null);
     setCurrentMode(batch?.mode === "practice-set" ? "practice-set" : "normal");
     setQuestionIndex(0);
@@ -705,7 +807,9 @@ function KanjiReadingQuizInner() {
   }
 
   function handleTryAdvanced() {
-    window.location.href = `/kanji-reading-quiz?unit=${encodeURIComponent(unit)}&tier=high_level&mode=normal`;
+    window.location.href = `/kanji-reading-quiz?unit=${encodeURIComponent(
+      unit
+    )}&tier=high_level&mode=normal`;
   }
 
   function renderReadingLines(value: string, side: "left" | "right") {
@@ -795,6 +899,7 @@ function KanjiReadingQuizInner() {
   const wrongCount = attempts.filter((a) => !a.is_correct).length;
   const isPracticeSet = batch?.mode === "practice-set";
   const hasMoreReadings = batch?.hasMoreReadingVariants === true;
+  const isFinalUnitComplete = currentMode !== "review" && unitComplete;
 
   if (loading) {
     return (
@@ -824,7 +929,11 @@ function KanjiReadingQuizInner() {
                   <button
                     type="button"
                     onClick={handleContinueFromStartScreen}
-                    style={{ ...styles.primaryButton, fontSize: 18, padding: "14px 28px" }}
+                    style={{
+                      ...styles.primaryButton,
+                      fontSize: 18,
+                      padding: "14px 28px",
+                    }}
                   >
                     Normal Mode
                   </button>
@@ -833,7 +942,12 @@ function KanjiReadingQuizInner() {
                     <button
                       type="button"
                       onClick={handleTryAdvanced}
-                      style={{ ...styles.secondaryButton, fontSize: 15, padding: "10px 18px", opacity: 0.9 }}
+                      style={{
+                        ...styles.secondaryButton,
+                        fontSize: 15,
+                        padding: "10px 18px",
+                        opacity: 0.9,
+                      }}
                     >
                       Try Advanced
                     </button>
@@ -861,7 +975,12 @@ function KanjiReadingQuizInner() {
                     <button
                       type="button"
                       onClick={handleTryAdvanced}
-                      style={{ ...styles.secondaryButton, fontSize: 15, padding: "10px 18px", opacity: 0.9 }}
+                      style={{
+                        ...styles.secondaryButton,
+                        fontSize: 15,
+                        padding: "10px 18px",
+                        opacity: 0.9,
+                      }}
                     >
                       Try Advanced
                     </button>
@@ -894,8 +1013,13 @@ function KanjiReadingQuizInner() {
         <div style={styles.centerWrap}>
           <div style={styles.messageCard}>
             <h2 style={styles.messageTitle}>
-              {currentMode === "review" ? "Review complete!" : "Set complete!"}
+              {currentMode === "review"
+                ? "Review complete!"
+                : isFinalUnitComplete
+                ? "Congratulations!"
+                : "Set complete!"}
             </h2>
+
             <p style={styles.messageText}>
               Correct: {correctCount} /{" "}
               {activeQuestions.length || batch?.questions.length || 0}
@@ -903,37 +1027,67 @@ function KanjiReadingQuizInner() {
             <p style={styles.messageText}>Wrong: {wrongCount}</p>
 
             <div style={styles.completeButtons}>
-              <button
-                type="button"
-                onClick={startWrongReview}
-                style={styles.primaryButton}
-              >
-                Review wrong answers
-              </button>
+              {isFinalUnitComplete ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={startWrongReview}
+                    style={styles.primaryButton}
+                  >
+                    Review wrong answers
+                  </button>
 
-              <button
-                type="button"
-                onClick={handleStudyNextFiveKanji}
-                style={styles.primaryButton}
-              >
-                Practice 5 more
-              </button>
+                  <button
+                    type="button"
+                    onClick={goHome}
+                    style={styles.secondaryButton}
+                  >
+                    Back to Home
+                  </button>
 
-              <button
-                type="button"
-                onClick={goHome}
-                style={styles.secondaryButton}
-              >
-                Back to Home
-              </button>
+                  <button
+                    type="button"
+                    onClick={handleRestartUnit}
+                    style={styles.secondaryButton}
+                  >
+                    Start from beginning
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={startWrongReview}
+                    style={styles.primaryButton}
+                  >
+                    Review wrong answers
+                  </button>
 
-              <button
-                type="button"
-                onClick={handlePracticeThisSetAgain}
-                style={styles.secondaryButton}
-              >
-                Practice this set again
-              </button>
+                  <button
+                    type="button"
+                    onClick={handleStudyNextFiveKanji}
+                    style={styles.primaryButton}
+                  >
+                    Practice 5 more
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={goHome}
+                    style={styles.secondaryButton}
+                  >
+                    Back to Home
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePracticeThisSetAgain}
+                    style={styles.secondaryButton}
+                  >
+                    Practice this set again
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1186,7 +1340,13 @@ function KanjiReadingQuizInner() {
                 >
                   <span style={styles.centeredButtonText}>ふりがなを表示</span>
                   <span style={styles.centeredButtonText}>Show Furigana</span>
-                  <span style={{ ...styles.sideButtonNote, width: "100%", textAlign: "center" }}>
+                  <span
+                    style={{
+                      ...styles.sideButtonNote,
+                      width: "100%",
+                      textAlign: "center",
+                    }}
+                  >
                     (for Other Kanji)
                   </span>
                 </button>
@@ -1501,7 +1661,13 @@ function KanjiReadingQuizInner() {
                 >
                   <span style={styles.centeredButtonText}>ふりがなを表示</span>
                   <span style={styles.centeredButtonText}>Show Furigana</span>
-                  <span style={{ ...styles.sideButtonNote, width: "100%", textAlign: "center" }}>
+                  <span
+                    style={{
+                      ...styles.sideButtonNote,
+                      width: "100%",
+                      textAlign: "center",
+                    }}
+                  >
                     (for Other Kanji)
                   </span>
                 </button>
