@@ -145,34 +145,44 @@ function getPromptFontSize(
   if (mode === "small-phone") {
     if (promptLength <= 8) return 34;
     if (promptLength <= 12) return 30;
-    if (promptLength <= 16) return 26;
-    if (promptLength <= 22) return 22;
-    return 20;
+    if (promptLength <= 16) return 25;
+    if (promptLength <= 20) return 22;
+    if (promptLength <= 26) return 19;
+    if (promptLength <= 34) return 17;
+    return 16;
   }
 
   if (mode === "phone") {
     if (promptLength <= 8) return 42;
     if (promptLength <= 12) return 36;
-    if (promptLength <= 16) return 31;
-    if (promptLength <= 22) return 26;
-    return 22;
+    if (promptLength <= 16) return 30;
+    if (promptLength <= 20) return 25;
+    if (promptLength <= 26) return 22;
+    if (promptLength <= 34) return 19;
+    if (promptLength <= 44) return 17;
+    return 16;
   }
 
   if (mode === "tablet") {
     if (promptLength <= 8) return 58;
     if (promptLength <= 12) return 50;
-    if (promptLength <= 16) return 43;
-    if (promptLength <= 22) return 36;
-    return 30;
+    if (promptLength <= 16) return 42;
+    if (promptLength <= 20) return 34;
+    if (promptLength <= 26) return 29;
+    if (promptLength <= 34) return 25;
+    if (promptLength <= 44) return 22;
+    return 20;
   }
 
   if (promptLength <= 8) return 82;
   if (promptLength <= 12) return 74;
-  if (promptLength <= 16) return 64;
-  if (promptLength <= 22) return 54;
-  if (promptLength <= 28) return 46;
-  if (promptLength <= 34) return 40;
-  return 34;
+  if (promptLength <= 16) return 62;
+  if (promptLength <= 20) return 42;
+  if (promptLength <= 26) return 36;
+  if (promptLength <= 34) return 30;
+  if (promptLength <= 44) return 26;
+  if (promptLength <= 58) return 23;
+  return 21;
 }
 
 function AssetImage({
@@ -1100,9 +1110,12 @@ function KanjiReadingQuizInner() {
       <main style={styles.page}>
         <div style={styles.centerWrap}>
           <div style={styles.messageCard}>
-            <h2 style={styles.messageTitle}>No questions available</h2>
+            <h2 style={styles.messageTitle}>
+              No quiz is available for this unit yet
+            </h2>
             <p style={styles.messageText}>
-              Please check your unit or published data.
+              You may have finished this unit, or the questions may still be in
+              preparation. Please ask your teacher.
             </p>
           </div>
         </div>
@@ -1114,6 +1127,34 @@ function KanjiReadingQuizInner() {
     currentQuestion.prompt.length,
     deviceMode
   );
+
+  const shouldWrapPrompt =
+    currentQuestion.prompt.length >
+    (isDesktop ? 18 : isTablet ? 14 : isSmallPhone ? 10 : 12);
+
+  const promptLineHeight = shouldWrapPrompt
+    ? showFurigana
+      ? isDesktop
+        ? 1.34
+        : 1.36
+      : isDesktop
+      ? 1.18
+      : 1.2
+    : isDesktop
+    ? 1.01
+    : 1.04;
+
+  const promptTextFitStyle: React.CSSProperties = {
+    ...styles.promptText,
+    fontSize: promptFontSize,
+    lineHeight: promptLineHeight,
+    transform: "none",
+    whiteSpace: shouldWrapPrompt ? "normal" : "nowrap",
+    overflowWrap: "anywhere",
+    wordBreak: shouldWrapPrompt ? "break-word" : "normal",
+    maxWidth: "100%",
+    width: "100%",
+  };
 
   const compactQuestionNumberSize = isDesktop ? 88 : isTablet ? 64 : 52;
   const compactQuestionFont = isDesktop ? 48 : isTablet ? 34 : 26;
@@ -1389,21 +1430,13 @@ function KanjiReadingQuizInner() {
                     <div
                       style={{
                         ...styles.promptCard,
-                        minHeight: 164,
-                        padding: "8px 18px",
+                        minHeight: shouldWrapPrompt ? 184 : 164,
+                        padding: shouldWrapPrompt ? "10px 22px" : "8px 18px",
                         transform: "translateX(-56px)",
                         width: "calc(100% + 56px)",
                       }}
                     >
-                      <div
-                        style={{
-                          ...styles.promptText,
-                          fontSize: promptFontSize,
-                          lineHeight: 1.01,
-                          transform: "none",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
+                      <div style={promptTextFitStyle}>
                         {renderPrompt(currentQuestion)}
                       </div>
                     </div>
@@ -1609,7 +1642,17 @@ function KanjiReadingQuizInner() {
               <div
                 style={{
                   ...styles.promptCard,
-                  minHeight: isTablet ? 150 : isSmallPhone ? 110 : 126,
+                  minHeight: isTablet
+                    ? shouldWrapPrompt
+                      ? 166
+                      : 150
+                    : isSmallPhone
+                    ? shouldWrapPrompt
+                      ? 132
+                      : 110
+                    : shouldWrapPrompt
+                    ? 144
+                    : 126,
                   padding: isTablet
                     ? "14px 18px"
                     : isSmallPhone
@@ -1617,17 +1660,7 @@ function KanjiReadingQuizInner() {
                     : "14px 14px",
                 }}
               >
-                <div
-                  style={{
-                    ...styles.promptText,
-                    fontSize: promptFontSize,
-                    lineHeight: 1.12,
-                    whiteSpace: "normal",
-                    overflowWrap: "anywhere",
-                    wordBreak: "break-word",
-                    width: "100%",
-                  }}
-                >
+                <div style={promptTextFitStyle}>
                   {renderPrompt(currentQuestion)}
                 </div>
               </div>
@@ -2236,6 +2269,7 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
     overflow: "hidden",
     width: "100%",
+    boxSizing: "border-box",
   },
   promptText: {
     fontWeight: 900,
@@ -2570,21 +2604,19 @@ const styles: Record<string, React.CSSProperties> = {
   },
   readingLine: {
     lineHeight: 1.18,
-    marginBottom: 1,
+    marginBottom: 2,
   },
   okuriganaNote: {
-    marginTop: 10,
-    fontSize: 12,
-    lineHeight: 1.4,
+    marginTop: 6,
+    fontSize: 10,
+    lineHeight: 1.25,
     fontWeight: 700,
     color: "#333",
   },
   bottomButtonRowDesktop: {
     display: "flex",
-    gap: 10,
     justifyContent: "center",
-    flexWrap: "wrap",
-    marginTop: 6,
+    marginTop: 2,
   },
   bottomButtonRowMobile: {
     display: "flex",

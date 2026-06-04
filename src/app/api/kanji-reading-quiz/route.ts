@@ -321,18 +321,8 @@ async function getReadingProgress(
 }
 
 async function hasAdvancedReadingQuestions(db: any, unit: string) {
-  const { count, error } = await db
-    .from(TABLE_NAME)
-    .select("*", { count: "exact", head: true })
-    .eq("unit", unit)
-    .eq("is_published", true)
-    .eq("difficulty_tier", "high_level");
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return (count ?? 0) > 0;
+  const rows = await fetchQuestionPool(db, unit, "high_level");
+  return rows.length > 0;
 }
 
 async function fetchQuestionPool(
@@ -373,6 +363,7 @@ async function fetchQuestionPool(
     )
     .eq("unit", unit)
     .eq("is_published", true)
+    .eq("quiz_mode", "ordered")
     .order("order_in_unit", { ascending: true })
     .order("kanji_order_in_unit", { ascending: true, nullsFirst: false })
     .order("reading_variant_order", { ascending: true, nullsFirst: false });
@@ -672,7 +663,7 @@ async function updateReadingQuestionHistory(
   studentAccountId: string,
   unit: string,
   attempts: AttemptRow[],
-  mode: string
+  _mode: string
 ) {
   if (attempts.length === 0) return;
 
@@ -699,15 +690,7 @@ async function updateReadingQuestionHistory(
     const currentCorrect = existing?.correct_count ?? 0;
     const currentWrong = existing?.wrong_count ?? 0;
 
-    let nextNeedsReview = existing?.needs_review ?? false;
-
-    if (item.is_correct) {
-      if (mode === "review-wrong") {
-        nextNeedsReview = false;
-      }
-    } else {
-      nextNeedsReview = true;
-    }
+    const nextNeedsReview = item.is_correct ? false : true;
 
     const row = {
       student_account_id: studentAccountId,
@@ -874,7 +857,7 @@ export async function GET(request: NextRequest) {
 
     let progress = await getReadingProgress(db, account.id, unit, difficultyTier);
 
-    if (startFromBeginning && difficultyTier === "normal") {
+    if (startFromBeginning) {
       const preservedCompletedCount = progress?.completed_count ?? 0;
       const now = new Date().toISOString();
 
@@ -890,7 +873,9 @@ export async function GET(request: NextRequest) {
 
       const { error: resetError } = await db
         .from("student_reading_progress")
-        .upsert(resetProgressRow);
+        .upsert(resetProgressRow, {
+          onConflict: "student_account_id,unit,difficulty_tier",
+        });
 
       if (resetError) {
         return NextResponse.json({ error: resetError.message }, { status: 400 });
@@ -982,7 +967,7 @@ export async function POST(request: NextRequest) {
         kanji: item.target_text || item.prompt,
         unit: item.unit ?? unit,
         order_in_unit: item.order_in_unit,
-        quiz_type: "reading_choice",
+        quiz_type: "reading_input",
         user_answer: item.user_answer,
         correct_answer: item.correct_answer,
         is_correct: item.is_correct,
@@ -1049,7 +1034,9 @@ export async function POST(request: NextRequest) {
 
     const { error: progressError } = await db
       .from("student_reading_progress")
-      .upsert(baseProgressRow);
+      .upsert(baseProgressRow, {
+        onConflict: "student_account_id,unit,difficulty_tier",
+      });
 
     if (progressError) {
       return NextResponse.json({ error: progressError.message }, { status: 400 });
@@ -1076,7 +1063,9 @@ export async function POST(request: NextRequest) {
 
       const { error: completeError } = await db
         .from("student_reading_progress")
-        .upsert(completeRow);
+        .upsert(completeRow, {
+          onConflict: "student_account_id,unit,difficulty_tier",
+        });
 
       if (completeError) {
         return NextResponse.json({ error: completeError.message }, { status: 400 });
