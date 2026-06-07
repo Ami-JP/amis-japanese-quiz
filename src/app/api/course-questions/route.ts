@@ -4,6 +4,25 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+type CourseRow = {
+  id: string;
+  course_slug: string;
+  title: string;
+  jlpt_level: string | null;
+  description: string | null;
+  total_days: number;
+  is_published: boolean;
+};
+
+type CourseDayRow = {
+  id: string;
+  day_number: number;
+  day_title: string;
+  day_theme: string | null;
+  kanji_list: unknown;
+  is_published: boolean;
+};
+
 type CourseQuestionRow = {
   id: string;
   course_id: string;
@@ -203,14 +222,13 @@ export async function GET(request: NextRequest) {
         is_published
       `
       )
-      .eq("course_slug", courseSlug)
-      .maybeSingle();
+      .eq("course_slug", courseSlug);
 
     if (!previewRequested) {
       courseQuery = courseQuery.eq("is_published", true);
     }
 
-    const { data: course, error: courseError } = await courseQuery;
+    const { data: courseRaw, error: courseError } = await courseQuery.maybeSingle();
 
     if (courseError) {
       return NextResponse.json(
@@ -223,7 +241,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (!course) {
+    if (!courseRaw) {
       return NextResponse.json(
         {
           ok: false,
@@ -232,6 +250,8 @@ export async function GET(request: NextRequest) {
         { status: 404 }
       );
     }
+
+    const course = courseRaw as CourseRow;
 
     let dayQuery = supabase
       .from("course_days")
@@ -246,14 +266,13 @@ export async function GET(request: NextRequest) {
       `
       )
       .eq("course_id", course.id)
-      .eq("day_number", dayNumber)
-      .maybeSingle();
+      .eq("day_number", dayNumber);
 
     if (!previewRequested) {
       dayQuery = dayQuery.eq("is_published", true);
     }
 
-    const { data: day, error: dayError } = await dayQuery;
+    const { data: dayRaw, error: dayError } = await dayQuery.maybeSingle();
 
     if (dayError) {
       return NextResponse.json(
@@ -266,7 +285,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (!day) {
+    if (!dayRaw) {
       return NextResponse.json(
         {
           ok: false,
@@ -275,6 +294,8 @@ export async function GET(request: NextRequest) {
         { status: 404 }
       );
     }
+
+    const day = dayRaw as CourseDayRow;
 
     let questionsQuery = supabase
       .from("course_questions")
