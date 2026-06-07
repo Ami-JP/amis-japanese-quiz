@@ -175,6 +175,28 @@ function splitCorrectAnswers(correctAnswer: string) {
     .filter(Boolean);
 }
 
+function getCorrectAnswerCandidates(correctAnswer: string) {
+  const candidates = [correctAnswer.trim(), ...splitCorrectAnswers(correctAnswer)];
+
+  const uniqueCandidates: string[] = [];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    const normalizedCandidate = normalizeAnswer(candidate);
+
+    const alreadyExists = uniqueCandidates.some(
+      (existing) => normalizeAnswer(existing) === normalizedCandidate
+    );
+
+    if (!alreadyExists) {
+      uniqueCandidates.push(candidate);
+    }
+  }
+
+  return uniqueCandidates;
+}
+
 function judgeAnswer(params: {
   userAnswer: string;
   correctAnswer: string;
@@ -185,13 +207,13 @@ function judgeAnswer(params: {
 
   if (!normalizedUserAnswer) return false;
 
-  const correctAnswers = splitCorrectAnswers(correctAnswer);
+  const correctAnswerCandidates = getCorrectAnswerCandidates(correctAnswer);
 
-  if (correctAnswers.length === 0) {
+  if (correctAnswerCandidates.length === 0) {
     return false;
   }
 
-  return correctAnswers.some((answer) => {
+  return correctAnswerCandidates.some((answer) => {
     const normalizedCorrectAnswer = normalizeAnswer(answer);
     return normalizedUserAnswer === normalizedCorrectAnswer;
   });
