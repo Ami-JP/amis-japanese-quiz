@@ -159,7 +159,7 @@ function decideDayState(params: {
     return "coming_soon";
   }
 
-  if (progress?.status === "completed") {
+  if (progress?.status === "completed" || status === "review_needed") {
     return "completed";
   }
 

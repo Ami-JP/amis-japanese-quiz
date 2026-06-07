@@ -320,7 +320,7 @@ export async function GET(request: NextRequest) {
     });
 
     const completedDays = normalizedDays.filter(
-      (day) => day.progress.status === "completed"
+      (day) => day.progress.status === "completed" || status === "review_needed"
     ).length;
 
     const reviewNeededDays = normalizedDays.filter(
