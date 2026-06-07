@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -169,17 +169,97 @@ function getQuestionInstruction(question: CourseQuestion) {
   return "Answer the question.";
 }
 
-function highlightTarget(sentence: string, targetText: string) {
+function buildInlineRubyParts(params: {
+  text: string;
+  rubyItems: RubyItem[];
+  keyPrefix: string;
+}) {
+  const { text, rubyItems, keyPrefix } = params;
+
+  const usableItems = rubyItems
+    .filter((item) => item.text && item.reading && text.includes(item.text))
+    .sort((a, b) => b.text.length - a.text.length);
+
+  if (usableItems.length === 0) {
+    return text;
+  }
+
+  const pattern = new RegExp(
+    usableItems.map((item) => escapeRegExp(item.text)).join("|"),
+    "g"
+  );
+
+  const readingMap = new Map(usableItems.map((item) => [item.text, item.reading]));
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let nodeIndex = 0;
+
+  for (const match of text.matchAll(pattern)) {
+    const matchedText = match[0];
+    const index = match.index ?? 0;
+    const reading = readingMap.get(matchedText);
+
+    if (index > lastIndex) {
+      nodes.push(text.slice(lastIndex, index));
+    }
+
+    if (reading) {
+      nodes.push(
+        <ruby key={`${keyPrefix}-ruby-${nodeIndex}`}>
+          {matchedText}
+          <rt>{reading}</rt>
+        </ruby>
+      );
+    } else {
+      nodes.push(matchedText);
+    }
+
+    lastIndex = index + matchedText.length;
+    nodeIndex += 1;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
+}
+
+function getQuestionTargetRubyItems(question: CourseQuestion) {
+  const annotationItems = parseRubyAnnotations(question.ruby_annotations);
+
+  return annotationItems.filter((item) => {
+    return (
+      item.text.length > 0 &&
+      item.text !== question.target_text &&
+      question.target_text.includes(item.text)
+    );
+  });
+}
+
+function highlightTarget(question: CourseQuestion) {
+  const sentence = question.completed_sentence ?? question.prompt;
+  const targetText = question.target_text;
+
   if (!sentence || !targetText || !sentence.includes(targetText)) {
     return sentence;
   }
 
+  const targetRubyItems = getQuestionTargetRubyItems(question);
   const parts = sentence.split(targetText);
 
   return parts.map((part, index) => (
     <span key={`${part}-${index}`}>
       {part}
-      {index < parts.length - 1 && <mark className="targetMark">{targetText}</mark>}
+      {index < parts.length - 1 && (
+        <mark className="targetMark">
+          {buildInlineRubyParts({
+            text: targetText,
+            rubyItems: targetRubyItems,
+            keyPrefix: `target-${index}`,
+          })}
+        </mark>
+      )}
     </span>
   ));
 }
@@ -970,10 +1050,7 @@ ${message}`);
         ) : (
           <>
             <div className="sentenceBox">
-              {highlightTarget(
-                currentQuestion.completed_sentence ?? currentQuestion.prompt,
-                currentQuestion.target_text
-              )}
+              {highlightTarget(currentQuestion)}
             </div>
 
             <label className="inputLabel" htmlFor="answer-input">

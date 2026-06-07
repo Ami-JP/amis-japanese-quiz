@@ -89,7 +89,9 @@ function getDayClass(day: CourseHomeDay) {
   if (day.state === "review_needed") classes.push("reviewNeeded");
   if (day.state === "in_progress") classes.push("inProgress");
   if (day.state === "current") classes.push("current");
+  if (day.state === "available") classes.push("available");
   if (day.state === "coming_soon") classes.push("comingSoon");
+
   if (day.day_number === 7 || day.day_number === 14 || day.day_number === 21) {
     classes.push("milestoneDay");
   }
@@ -140,6 +142,7 @@ export default function CourseHomePage() {
 
   const completedDays = data?.summary?.completed_days ?? 0;
   const totalDays = data?.summary?.total_days ?? 30;
+  const reviewNeededDays = data?.summary?.review_needed_days ?? 0;
   const progressPercent = data?.summary?.progress_percent ?? 0;
   const overallAccuracy = data?.summary?.overall_accuracy ?? 0;
   const answeredCount = data?.summary?.overall_answered_count ?? 0;
@@ -284,6 +287,9 @@ export default function CourseHomePage() {
               <strong>
                 {completedDays} / {totalDays}日
               </strong>
+              {reviewNeededDays > 0 && (
+                <span className="smallStat">復習あり {reviewNeededDays}日 / Review needed</span>
+              )}
             </div>
 
             <div className="summaryItem">
@@ -297,6 +303,38 @@ export default function CourseHomePage() {
                 </span>
               )}
             </div>
+          </div>
+        </section>
+
+        <section className="legendPanel" aria-label="Map color guide">
+          <div className="legendItem">
+            <span className="legendDot completedDot" />
+            <span>完了</span>
+            <small>Completed</small>
+          </div>
+
+          <div className="legendItem">
+            <span className="legendDot reviewDot" />
+            <span>復習あり</span>
+            <small>Review needed</small>
+          </div>
+
+          <div className="legendItem">
+            <span className="legendDot progressDot" />
+            <span>途中</span>
+            <small>In progress</small>
+          </div>
+
+          <div className="legendItem">
+            <span className="legendDot availableDot" />
+            <span>未着手</span>
+            <small>Not started</small>
+          </div>
+
+          <div className="legendItem">
+            <span className="legendDot soonDot" />
+            <span>準備中</span>
+            <small>Coming soon</small>
           </div>
         </section>
 
@@ -321,6 +359,13 @@ export default function CourseHomePage() {
 
                 const node = (
                   <div className="nodeWrap">
+                    {day.state === "current" && (
+                      <div className="currentMarker">
+                        <span>今日ここ🔻</span>
+                        <small>Today</small>
+                      </div>
+                    )}
+
                     {decoration && <span className="decoration">{decoration}</span>}
 
                     <div className={getDayClass(day)}>
@@ -582,6 +627,7 @@ const styles = `
     color: #cbd5e1;
     font-size: 12px;
     font-weight: 800;
+    line-height: 1.4;
   }
 
   .progressLine {
@@ -599,10 +645,74 @@ const styles = `
     background: linear-gradient(90deg, #a3e635, #84cc16);
   }
 
+  .legendPanel {
+    margin: 16px 0 0;
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+    border-radius: 22px;
+    background: rgba(4, 12, 34, 0.7);
+    border: 1px solid rgba(147, 197, 253, 0.2);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+  }
+
+  .legendItem {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 8px;
+    row-gap: 1px;
+    align-items: center;
+    color: #f8fafc;
+  }
+
+  .legendDot {
+    grid-row: 1 / 3;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.72);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.14);
+  }
+
+  .legendItem span:not(.legendDot) {
+    font-size: 13px;
+    font-weight: 950;
+    line-height: 1.2;
+  }
+
+  .legendItem small {
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .completedDot {
+    background: #22c55e;
+  }
+
+  .reviewDot {
+    background: #8b5cf6;
+  }
+
+  .progressDot {
+    background: #facc15;
+  }
+
+  .availableDot {
+    background: #3b82f6;
+  }
+
+  .soonDot {
+    background: #94a3b8;
+  }
+
   .mapArea {
     position: relative;
     margin-top: 28px;
-    padding: 28px 20px 16px;
+    padding: 42px 20px 16px;
   }
 
   .mapArea::before {
@@ -619,7 +729,7 @@ const styles = `
   .startFlag {
     position: absolute;
     left: 4px;
-    top: -2px;
+    top: 12px;
     z-index: 5;
     color: #78350f;
     text-align: center;
@@ -646,7 +756,7 @@ const styles = `
     display: grid;
     grid-template-columns: repeat(5, 1fr);
     gap: 22px;
-    margin-bottom: 34px;
+    margin-bottom: 42px;
   }
 
   .mapRow:last-child {
@@ -657,12 +767,12 @@ const styles = `
     position: relative;
     display: flex;
     justify-content: center;
-    min-height: 124px;
+    min-height: 140px;
   }
 
   .road {
     position: absolute;
-    top: 48px;
+    top: 64px;
     left: 58%;
     width: 82%;
     height: 10px;
@@ -677,9 +787,9 @@ const styles = `
 
   .rowConnector {
     position: absolute;
-    bottom: -22px;
+    bottom: -24px;
     width: 10px;
-    height: 48px;
+    height: 52px;
     border-radius: 999px;
     background: repeating-linear-gradient(
       180deg,
@@ -703,11 +813,46 @@ const styles = `
     display: flex;
     align-items: center;
     flex-direction: column;
+    padding-top: 18px;
   }
 
   .dayLink {
     color: inherit;
     text-decoration: none;
+  }
+
+  .currentMarker {
+    position: absolute;
+    top: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 6px 10px;
+    border-radius: 14px;
+    background: rgba(255, 247, 237, 0.96);
+    color: #7c2d12;
+    box-shadow:
+      0 5px 0 rgba(180, 83, 9, 0.7),
+      0 10px 18px rgba(0, 0, 0, 0.25);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .currentMarker span {
+    font-size: 13px;
+    font-weight: 950;
+    line-height: 1.1;
+  }
+
+  .currentMarker small {
+    font-size: 10px;
+    font-weight: 900;
+    color: #92400e;
+    line-height: 1.1;
   }
 
   .dayNode {
@@ -744,15 +889,25 @@ const styles = `
     text-shadow: 0 3px 0 rgba(15, 23, 42, 0.34);
   }
 
+  .dayNode.available {
+    background:
+      radial-gradient(circle at 34% 22%, rgba(255, 255, 255, 0.45), transparent 30%),
+      linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+    border-color: #bfdbfe;
+    box-shadow:
+      0 8px 0 #1d4ed8,
+      0 0 20px rgba(96, 165, 250, 0.44);
+  }
+
   .dayNode.current {
     background:
-      radial-gradient(circle at 34% 22%, rgba(255, 255, 255, 0.48), transparent 30%),
-      linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
-    border-color: #fde68a;
+      radial-gradient(circle at 34% 22%, rgba(255, 255, 255, 0.54), transparent 30%),
+      linear-gradient(180deg, #fef08a 0%, #f59e0b 52%, #dc2626 100%);
+    border-color: #fff7ed;
     box-shadow:
-      0 8px 0 #f59e0b,
-      0 0 0 8px rgba(254, 240, 138, 0.18),
-      0 0 28px rgba(56, 189, 248, 0.72);
+      0 8px 0 #991b1b,
+      0 0 0 8px rgba(254, 240, 138, 0.2),
+      0 0 30px rgba(250, 204, 21, 0.7);
   }
 
   .dayNode.completed {
@@ -765,8 +920,7 @@ const styles = `
       0 0 20px rgba(34, 197, 94, 0.44);
   }
 
-  .dayNode.reviewNeeded,
-  .dayNode.reviewDay {
+  .dayNode.reviewNeeded {
     background:
       radial-gradient(circle at 34% 22%, rgba(255, 255, 255, 0.5), transparent 30%),
       linear-gradient(180deg, #c084fc 0%, #7e22ce 100%);
@@ -776,42 +930,41 @@ const styles = `
       0 0 20px rgba(168, 85, 247, 0.42);
   }
 
-  .dayNode.milestoneDay {
+  .dayNode.inProgress {
     background:
       radial-gradient(circle at 34% 22%, rgba(255, 255, 255, 0.5), transparent 30%),
-      linear-gradient(180deg, #fb7185 0%, #e11d48 100%);
-    border-color: #fecdd3;
-    box-shadow:
-      0 8px 0 #be123c,
-      0 0 22px rgba(244, 63, 94, 0.5);
-  }
-
-  .dayNode.finalDay {
-    width: 124px;
-    height: 124px;
-    background:
-      radial-gradient(circle at 34% 22%, rgba(255, 255, 255, 0.5), transparent 30%),
-      linear-gradient(180deg, #fde047 0%, #ca8a04 100%);
+      linear-gradient(180deg, #fde68a 0%, #facc15 48%, #d97706 100%);
     border-color: #fef3c7;
     box-shadow:
-      0 9px 0 #854d0e,
-      0 0 30px rgba(250, 204, 21, 0.62);
+      0 8px 0 #92400e,
+      0 0 22px rgba(250, 204, 21, 0.46);
+    color: #ffffff;
   }
 
   .dayNode.comingSoon {
     background:
       radial-gradient(circle at 34% 22%, rgba(255, 255, 255, 0.28), transparent 30%),
-      linear-gradient(180deg, #64748b 0%, #334155 100%);
-    border-color: rgba(203, 213, 225, 0.35);
+      linear-gradient(180deg, #94a3b8 0%, #475569 100%);
+    border-color: rgba(203, 213, 225, 0.42);
     box-shadow:
       0 8px 0 #1e293b,
       0 0 14px rgba(148, 163, 184, 0.18);
     opacity: 0.82;
   }
 
+  .dayNode.finalDay {
+    width: 124px;
+    height: 124px;
+  }
+
+  .dayNode.reviewDay {
+    outline: 3px solid rgba(221, 214, 254, 0.34);
+    outline-offset: 5px;
+  }
+
   .decoration {
     position: absolute;
-    top: -16px;
+    top: 2px;
     right: -4px;
     z-index: 4;
     font-size: 34px;
@@ -972,8 +1125,22 @@ const styles = `
       font-size: 21px;
     }
 
+    .legendPanel {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 10px;
+      padding: 13px 14px;
+    }
+
+    .legendItem span:not(.legendDot) {
+      font-size: 12px;
+    }
+
+    .legendItem small {
+      font-size: 10px;
+    }
+
     .mapArea {
-      padding: 22px 0 8px;
+      padding: 34px 0 8px;
     }
 
     .startFlag {
@@ -982,22 +1149,40 @@ const styles = `
 
     .mapRow {
       gap: 9px;
-      margin-bottom: 28px;
+      margin-bottom: 36px;
     }
 
     .mapCell {
-      min-height: 90px;
+      min-height: 106px;
     }
 
     .road {
-      top: 36px;
+      top: 52px;
       height: 7px;
     }
 
     .rowConnector {
-      bottom: -18px;
-      height: 38px;
+      bottom: -22px;
+      height: 42px;
       width: 7px;
+    }
+
+    .nodeWrap {
+      padding-top: 18px;
+    }
+
+    .currentMarker {
+      top: -20px;
+      padding: 5px 8px;
+      border-radius: 12px;
+    }
+
+    .currentMarker span {
+      font-size: 10px;
+    }
+
+    .currentMarker small {
+      font-size: 8px;
     }
 
     .dayNode {
@@ -1017,7 +1202,7 @@ const styles = `
     }
 
     .decoration {
-      top: -12px;
+      top: 4px;
       right: -8px;
       font-size: 24px;
     }
@@ -1029,6 +1214,10 @@ const styles = `
   }
 
   @media (max-width: 430px) {
+    .legendPanel {
+      grid-template-columns: 1fr;
+    }
+
     .mapRow {
       gap: 5px;
     }
@@ -1048,12 +1237,12 @@ const styles = `
     }
 
     .road {
-      top: 31px;
+      top: 47px;
       height: 6px;
     }
 
     .rowConnector {
-      height: 34px;
+      height: 38px;
     }
 
     .heroText h1 {
