@@ -403,6 +403,84 @@ function getMeaningText(question: CourseQuestion) {
   return meaningEn || meaningJa || "";
 }
 
+function katakanaToHiragana(value: string) {
+  return value.replace(/[ァ-ヶ]/g, (char) =>
+    String.fromCharCode(char.charCodeAt(0) - 0x60)
+  );
+}
+
+function normalizeAnswer(value: string) {
+  return katakanaToHiragana(
+    value
+      .normalize("NFKC")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "")
+      .replace(/[　]/g, "")
+      .replace(/[。、，,.!！?？]/g, "")
+  );
+}
+
+function splitCorrectAnswers(correctAnswer: string) {
+  return correctAnswer
+    .split(/[／/，、
+;；|｜]+/g)
+    .map((answer) => answer.trim())
+    .filter(Boolean);
+}
+
+function getCorrectAnswerCandidates(correctAnswer: string) {
+  const candidates = [correctAnswer.trim(), ...splitCorrectAnswers(correctAnswer)];
+  const uniqueCandidates: string[] = [];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    const normalizedCandidate = normalizeAnswer(candidate);
+    const alreadyExists = uniqueCandidates.some(
+      (existing) => normalizeAnswer(existing) === normalizedCandidate
+    );
+
+    if (!alreadyExists) {
+      uniqueCandidates.push(candidate);
+    }
+  }
+
+  return uniqueCandidates;
+}
+
+function judgeAnswer(params: {
+  userAnswer: string;
+  correctAnswer: string;
+}) {
+  const { userAnswer, correctAnswer } = params;
+  const normalizedUserAnswer = normalizeAnswer(userAnswer);
+
+  if (!normalizedUserAnswer) return false;
+
+  return getCorrectAnswerCandidates(correctAnswer).some((answer) => {
+    return normalizeAnswer(answer) === normalizedUserAnswer;
+  });
+}
+
+function buildImmediateResult(params: {
+  question: CourseQuestion;
+  userAnswer: string;
+}): NonNullable<AttemptResponse["result"]> {
+  const { question, userAnswer } = params;
+  const correctAnswer = question.answer_text;
+  const isCorrect = judgeAnswer({ userAnswer, correctAnswer });
+
+  return {
+    is_correct: isCorrect,
+    user_answer: userAnswer,
+    correct_answer: correctAnswer,
+    explanation_ja: question.explanation_ja,
+    explanation_en: question.explanation_en,
+    kanji_hint: question.kanji_hint ?? null,
+  };
+}
+
 export default function CourseDayQuizPage() {
   const params = useParams();
 
@@ -565,9 +643,23 @@ export default function CourseDayQuizPage() {
 
     if (!userAnswer) return;
 
-    try {
-      setSubmitting(true);
+    const immediateResult = buildImmediateResult({
+      question: currentQuestion,
+      userAnswer,
+    });
 
+    rememberAnsweredQuestion(currentQuestion.id);
+
+    if (immediateResult.is_correct) {
+      removeWrongQuestion(currentQuestion.id);
+    } else {
+      rememberWrongQuestion(currentQuestion.id);
+    }
+
+    setAnswerResult(immediateResult);
+    setSubmitting(true);
+
+    try {
       const response = await fetch("/api/course-attempts", {
         method: "POST",
         credentials: "include",
@@ -586,21 +678,20 @@ export default function CourseDayQuizPage() {
         throw new Error(data.error || "Failed to submit answer.");
       }
 
-      const result = data.result ?? null;
+      const savedResult = data.result ?? immediateResult;
 
-      rememberAnsweredQuestion(currentQuestion.id);
-
-      if (result?.is_correct) {
+      if (savedResult.is_correct) {
         removeWrongQuestion(currentQuestion.id);
       } else {
         rememberWrongQuestion(currentQuestion.id);
       }
 
-      setAnswerResult(result);
+      setAnswerResult(savedResult);
       setLatestProgress(data.progress ?? null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to submit answer.";
-      alert(message);
+      const message = error instanceof Error ? error.message : "Failed to save answer.";
+      alert(`答えは表示しましたが、保存に失敗しました。
+${message}`);
     } finally {
       setSubmitting(false);
     }

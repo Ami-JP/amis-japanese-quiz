@@ -159,15 +159,17 @@ function decideDayState(params: {
     return "coming_soon";
   }
 
-  if (progress?.status === "completed" || status === "review_needed") {
+  const status = progress?.status ?? "not_started";
+
+  if (status === "completed") {
     return "completed";
   }
 
-  if (progress?.status === "review_needed") {
+  if (status === "review_needed") {
     return "review_needed";
   }
 
-  if (progress?.status === "in_progress") {
+  if (status === "in_progress") {
     return "in_progress";
   }
 
@@ -352,7 +354,11 @@ export async function GET(request: NextRequest) {
         const count = questionCountMap.get(day.day_number) ?? 0;
         const progress = progressMap.get(day.day_number) ?? null;
 
-        return count > 0 && progress?.status !== "completed";
+        return (
+          count > 0 &&
+          progress?.status !== "completed" &&
+          progress?.status !== "review_needed"
+        );
       })?.day_number ?? null;
 
     const decoratedDays = days.map((day) => {
@@ -375,7 +381,7 @@ export async function GET(request: NextRequest) {
     const totalDays = typedCourse.total_days || decoratedDays.length || 30;
 
     const completedDays = decoratedDays.filter(
-      (day) => day.state === "completed"
+      (day) => day.state === "completed" || day.state === "review_needed"
     ).length;
 
     const reviewNeededDays = decoratedDays.filter(
