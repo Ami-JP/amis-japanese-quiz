@@ -10,6 +10,16 @@ type StudentSessionResult = {
   expires_at?: string | null;
 };
 
+type CourseRow = {
+  id: string;
+  course_slug: string;
+  title: string;
+  jlpt_level: string | null;
+  description: string | null;
+  total_days: number;
+  is_published: boolean;
+};
+
 type CourseProgressRow = {
   id: string;
   course_id: string;
@@ -183,14 +193,14 @@ export async function GET(request: NextRequest) {
         is_published
       `
       )
-      .eq("course_slug", courseSlug)
-      .maybeSingle();
+      .eq("course_slug", courseSlug);
 
     if (!previewRequested) {
       courseQuery = courseQuery.eq("is_published", true);
     }
 
-    const { data: course, error: courseError } = await courseQuery;
+    const { data: courseRaw, error: courseError } =
+      await courseQuery.maybeSingle();
 
     if (courseError) {
       return NextResponse.json(
@@ -203,7 +213,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (!course) {
+    if (!courseRaw) {
       return NextResponse.json(
         {
           ok: false,
@@ -212,6 +222,8 @@ export async function GET(request: NextRequest) {
         { status: 404 }
       );
     }
+
+    const course = courseRaw as CourseRow;
 
     let daysQuery = supabase
       .from("course_days")
