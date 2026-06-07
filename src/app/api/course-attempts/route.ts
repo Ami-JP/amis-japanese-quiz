@@ -700,14 +700,13 @@ export async function POST(request: NextRequest) {
         is_published
       `
       )
-      .eq("id", courseQuestionId)
-      .maybeSingle();
+      .eq("id", courseQuestionId);
 
     if (!previewRequested) {
       questionQuery = questionQuery.eq("is_published", true).eq("status", "ready");
     }
 
-    const { data: question, error: questionError } = await questionQuery;
+    const { data: question, error: questionError } = await questionQuery.maybeSingle();
 
     if (questionError) {
       return NextResponse.json(
