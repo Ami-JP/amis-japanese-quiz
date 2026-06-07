@@ -423,8 +423,7 @@ function normalizeAnswer(value: string) {
 
 function splitCorrectAnswers(correctAnswer: string) {
   return correctAnswer
-    .split(/[／/，、
-;；|｜]+/g)
+    .split(/[／\/，、\n\r;；|｜]+/g)
     .map((answer) => answer.trim())
     .filter(Boolean);
 }
