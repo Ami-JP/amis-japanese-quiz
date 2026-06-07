@@ -299,6 +299,33 @@ function getFallbackRubyItems(question: CourseQuestion): RubyItem[] {
   return fallbackMap[sentence] ?? [];
 }
 
+function shouldAddFallbackTargetRuby(params: {
+  annotationItems: RubyItem[];
+  fallbackTargetText: string;
+}) {
+  const { annotationItems, fallbackTargetText } = params;
+
+  if (!fallbackTargetText) return false;
+
+  const hasExplicitTargetRuby = annotationItems.some((item) => {
+    return item.text === fallbackTargetText;
+  });
+
+  if (hasExplicitTargetRuby) return false;
+
+  const hasPartialTargetRuby = annotationItems.some((item) => {
+    return (
+      item.text.length > 0 &&
+      item.text !== fallbackTargetText &&
+      fallbackTargetText.includes(item.text)
+    );
+  });
+
+  if (hasPartialTargetRuby) return false;
+
+  return true;
+}
+
 function mergeRubyItems(params: {
   annotationItems: RubyItem[];
   fallbackItems: RubyItem[];
@@ -321,7 +348,12 @@ function mergeRubyItems(params: {
     }
   }
 
-  if (fallbackTargetText && fallbackReading && !map.has(fallbackTargetText)) {
+  const shouldAddTargetRuby = shouldAddFallbackTargetRuby({
+    annotationItems,
+    fallbackTargetText,
+  });
+
+  if (shouldAddTargetRuby && fallbackReading && !map.has(fallbackTargetText)) {
     map.set(fallbackTargetText, {
       text: fallbackTargetText,
       reading: fallbackReading,
