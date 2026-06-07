@@ -461,7 +461,7 @@ export default function CourseDayQuizPage() {
         const questionsResponse = await fetch(
           `/api/course-questions?course_slug=${encodeURIComponent(
             courseSlug
-          )}&day=${dayNumber}&preview=1`,
+          )}&day=${dayNumber}`,
           {
             method: "GET",
             credentials: "include",
@@ -480,7 +480,7 @@ export default function CourseDayQuizPage() {
         const statusResponse = await fetch(
           `/api/course-attempts?course_slug=${encodeURIComponent(
             courseSlug
-          )}&day=${dayNumber}&preview=1`,
+          )}&day=${dayNumber}`,
           {
             method: "GET",
             credentials: "include",
@@ -577,7 +577,6 @@ export default function CourseDayQuizPage() {
         body: JSON.stringify({
           course_question_id: currentQuestion.id,
           user_answer: userAnswer,
-          preview: true,
         }),
       });
 
