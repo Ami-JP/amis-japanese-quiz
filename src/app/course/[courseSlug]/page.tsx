@@ -309,32 +309,27 @@ export default function CourseHomePage() {
         <section className="legendPanel" aria-label="Map color guide">
           <div className="legendItem">
             <span className="legendDot completedDot" />
-            <span>完了</span>
-            <small>Completed</small>
+            <span>完了 / Done</span>
           </div>
 
           <div className="legendItem">
             <span className="legendDot reviewDot" />
-            <span>復習あり</span>
-            <small>Review needed</small>
+            <span>復習 / Review</span>
           </div>
 
           <div className="legendItem">
             <span className="legendDot progressDot" />
-            <span>途中</span>
-            <small>In progress</small>
+            <span>途中 / Progress</span>
           </div>
 
           <div className="legendItem">
             <span className="legendDot availableDot" />
-            <span>未着手</span>
-            <small>Not started</small>
+            <span>未着手 / Not started</span>
           </div>
 
           <div className="legendItem">
             <span className="legendDot soonDot" />
-            <span>準備中</span>
-            <small>Coming soon</small>
+            <span>準備中 / Soon</span>
           </div>
         </section>
 
@@ -646,47 +641,42 @@ const styles = `
   }
 
   .legendPanel {
-    margin: 16px 0 0;
-    padding: 14px 16px;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 10px;
-    border-radius: 22px;
-    background: rgba(4, 12, 34, 0.7);
-    border: 1px solid rgba(147, 197, 253, 0.2);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+    margin: 12px 0 0;
+    padding: 9px 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px 8px;
+    border-radius: 18px;
+    background: rgba(4, 12, 34, 0.58);
+    border: 1px solid rgba(147, 197, 253, 0.16);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
   }
 
   .legendItem {
     min-width: 0;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: 8px;
-    row-gap: 1px;
+    display: inline-flex;
     align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.42);
     color: #f8fafc;
+    white-space: nowrap;
   }
 
   .legendDot {
-    grid-row: 1 / 3;
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
     border-radius: 999px;
     border: 2px solid rgba(255, 255, 255, 0.72);
-    box-shadow: 0 0 12px rgba(255, 255, 255, 0.14);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
   }
 
   .legendItem span:not(.legendDot) {
-    font-size: 13px;
-    font-weight: 950;
-    line-height: 1.2;
-  }
-
-  .legendItem small {
-    color: #cbd5e1;
     font-size: 11px;
-    font-weight: 800;
-    line-height: 1.2;
+    font-weight: 950;
+    line-height: 1;
   }
 
   .completedDot {
@@ -1126,16 +1116,23 @@ const styles = `
     }
 
     .legendPanel {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px 10px;
-      padding: 13px 14px;
+      margin-top: 10px;
+      padding: 8px 9px;
+      gap: 6px;
+    }
+
+    .legendItem {
+      padding: 5px 7px;
+      gap: 5px;
+    }
+
+    .legendDot {
+      width: 11px;
+      height: 11px;
+      border-width: 2px;
     }
 
     .legendItem span:not(.legendDot) {
-      font-size: 12px;
-    }
-
-    .legendItem small {
       font-size: 10px;
     }
 
@@ -1215,7 +1212,13 @@ const styles = `
 
   @media (max-width: 430px) {
     .legendPanel {
-      grid-template-columns: 1fr;
+      display: flex;
+      flex-wrap: wrap;
+      max-height: none;
+    }
+
+    .legendItem {
+      flex: 0 1 auto;
     }
 
     .mapRow {
