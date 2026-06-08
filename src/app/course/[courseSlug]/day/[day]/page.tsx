@@ -105,6 +105,11 @@ type AttemptStatusResponse = {
   progress?: Progress | null;
 };
 
+type AnswerResultState = {
+  questionId: string;
+  result: NonNullable<AttemptResponse["result"]>;
+};
+
 type RubyItem = {
   text: string;
   reading: string;
@@ -609,8 +614,11 @@ export default function CourseDayQuizPage() {
   const [typedAnswer, setTypedAnswer] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
-  const [answerResult, setAnswerResult] = useState<AttemptResponse["result"] | null>(null);
+  const [answerResultState, setAnswerResultState] = useState<AnswerResultState | null>(null);
   const [latestProgress, setLatestProgress] = useState<Progress | null>(null);
+
+  const activeQuestionIdRef = useRef<string | null>(null);
+  const saveSequenceRef = useRef(0);
 
   const [finished, setFinished] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
@@ -626,6 +634,15 @@ export default function CourseDayQuizPage() {
   }, [allQuestions, reviewMode, reviewQuestionIds]);
 
   const currentQuestion = activeQuestions[currentIndex];
+
+  const answerResult =
+    answerResultState && currentQuestion?.id === answerResultState.questionId
+      ? answerResultState.result
+      : null;
+
+  useEffect(() => {
+    activeQuestionIdRef.current = currentQuestion?.id ?? null;
+  }, [currentQuestion?.id]);
 
   const progressPercent =
     activeQuestions.length === 0
@@ -697,7 +714,7 @@ export default function CourseDayQuizPage() {
         setReviewQuestionIds([]);
         setReviewMode(false);
         setLatestProgress(statusData.progress ?? null);
-        setAnswerResult(null);
+        setAnswerResultState(null);
         setSelectedChoice("");
         setTypedAnswer("");
 
@@ -721,9 +738,10 @@ export default function CourseDayQuizPage() {
   }, [courseSlug, dayNumber]);
 
   function resetAnswerState() {
+    saveSequenceRef.current += 1;
     setSelectedChoice("");
     setTypedAnswer("");
-    setAnswerResult(null);
+    setAnswerResultState(null);
     setSubmitting(false);
   }
 
@@ -748,26 +766,35 @@ export default function CourseDayQuizPage() {
   async function handleSubmit() {
     if (!currentQuestion || submitting || answerResult) return;
 
-    const userAnswer = isMeaningQuestion(currentQuestion)
+    const questionAtSubmit = currentQuestion;
+    const questionIdAtSubmit = questionAtSubmit.id;
+
+    const userAnswer = isMeaningQuestion(questionAtSubmit)
       ? selectedChoice.trim()
       : typedAnswer.trim();
 
     if (!userAnswer) return;
 
+    const saveToken = saveSequenceRef.current + 1;
+    saveSequenceRef.current = saveToken;
+
     const immediateResult = buildImmediateResult({
-      question: currentQuestion,
+      question: questionAtSubmit,
       userAnswer,
     });
 
-    rememberAnsweredQuestion(currentQuestion.id);
+    rememberAnsweredQuestion(questionIdAtSubmit);
 
     if (immediateResult.is_correct) {
-      removeWrongQuestion(currentQuestion.id);
+      removeWrongQuestion(questionIdAtSubmit);
     } else {
-      rememberWrongQuestion(currentQuestion.id);
+      rememberWrongQuestion(questionIdAtSubmit);
     }
 
-    setAnswerResult(immediateResult);
+    setAnswerResultState({
+      questionId: questionIdAtSubmit,
+      result: immediateResult,
+    });
     setSubmitting(true);
 
     try {
@@ -778,7 +805,7 @@ export default function CourseDayQuizPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          course_question_id: currentQuestion.id,
+          course_question_id: questionIdAtSubmit,
           user_answer: userAnswer,
         }),
       });
@@ -792,30 +819,53 @@ export default function CourseDayQuizPage() {
       const savedResult = data.result ?? immediateResult;
 
       if (savedResult.is_correct) {
-        removeWrongQuestion(currentQuestion.id);
+        removeWrongQuestion(questionIdAtSubmit);
       } else {
-        rememberWrongQuestion(currentQuestion.id);
+        rememberWrongQuestion(questionIdAtSubmit);
       }
 
-      setAnswerResult(savedResult);
       setLatestProgress(data.progress ?? null);
+
+      const isStillSameQuestion =
+        activeQuestionIdRef.current === questionIdAtSubmit &&
+        saveSequenceRef.current === saveToken;
+
+      if (isStillSameQuestion) {
+        setAnswerResultState({
+          questionId: questionIdAtSubmit,
+          result: savedResult,
+        });
+      }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save answer.";
-      alert(`答えは表示しましたが、保存に失敗しました。
+      const isStillSameQuestion =
+        activeQuestionIdRef.current === questionIdAtSubmit &&
+        saveSequenceRef.current === saveToken;
+
+      if (isStillSameQuestion) {
+        const message = error instanceof Error ? error.message : "Failed to save answer.";
+        alert(`答えは表示しましたが、保存に失敗しました。
 ${message}`);
+      }
     } finally {
-      setSubmitting(false);
+      const isStillSameQuestion =
+        activeQuestionIdRef.current === questionIdAtSubmit &&
+        saveSequenceRef.current === saveToken;
+
+      if (isStillSameQuestion) {
+        setSubmitting(false);
+      }
     }
   }
 
   function handleNext() {
+    resetAnswerState();
+
     if (currentIndex >= activeQuestions.length - 1) {
       setFinished(true);
       return;
     }
 
     setCurrentIndex((previous) => previous + 1);
-    resetAnswerState();
   }
 
   function handleRestart() {
