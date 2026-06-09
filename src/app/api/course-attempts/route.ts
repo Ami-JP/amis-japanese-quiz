@@ -147,7 +147,23 @@ async function assertCourseEnrollment(params: {
 }
 
 function isMeaningQuestion(question: CourseQuestionRow) {
-  return question.section === "kanji_meaning" || question.quiz_type === "kanji_meaning";
+  return (
+    question.section === "kanji_meaning" ||
+    question.quiz_type === "kanji_meaning"
+  );
+}
+
+function isReadingQuestion(question: CourseQuestionRow) {
+  if (isMeaningQuestion(question)) return false;
+
+  return (
+    question.section === "kanji_reading" ||
+    question.section === "vocab_reading" ||
+    question.quiz_type === "kanji_reading" ||
+    question.quiz_type === "vocab_reading" ||
+    question.section.includes("reading") ||
+    question.quiz_type.includes("reading")
+  );
 }
 
 function katakanaToHiragana(value: string) {
@@ -197,11 +213,324 @@ function getCorrectAnswerCandidates(correctAnswer: string) {
   return uniqueCandidates;
 }
 
+function hasKana(value: string) {
+  return /[\u3040-\u30ff]/.test(value);
+}
+
+function hasLatin(value: string) {
+  return /[A-Za-zāīūēōĀĪŪĒŌ]/.test(value);
+}
+
+function isLikelyRomaji(value: string) {
+  const normalized = value.normalize("NFKC").trim();
+
+  if (!normalized) return false;
+  if (hasKana(normalized)) return false;
+
+  return hasLatin(normalized);
+}
+
+function normalizeRomaji(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[āĀ]/g, "a")
+    .replace(/[īĪ]/g, "i")
+    .replace(/[ūŪ]/g, "u")
+    .replace(/[ēĒ]/g, "e")
+    .replace(/[ōŌ]/g, "o")
+    .replace(/[^a-z]/g, "");
+}
+
+const basicRomajiMap: Record<string, string[]> = {
+  あ: ["a"],
+  い: ["i"],
+  う: ["u"],
+  え: ["e"],
+  お: ["o"],
+
+  か: ["ka"],
+  き: ["ki"],
+  く: ["ku"],
+  け: ["ke"],
+  こ: ["ko"],
+
+  さ: ["sa"],
+  し: ["shi", "si"],
+  す: ["su"],
+  せ: ["se"],
+  そ: ["so"],
+
+  た: ["ta"],
+  ち: ["chi", "ti"],
+  つ: ["tsu", "tu"],
+  て: ["te"],
+  と: ["to"],
+
+  な: ["na"],
+  に: ["ni"],
+  ぬ: ["nu"],
+  ね: ["ne"],
+  の: ["no"],
+
+  は: ["ha"],
+  ひ: ["hi"],
+  ふ: ["fu", "hu"],
+  へ: ["he"],
+  ほ: ["ho"],
+
+  ま: ["ma"],
+  み: ["mi"],
+  む: ["mu"],
+  め: ["me"],
+  も: ["mo"],
+
+  や: ["ya"],
+  ゆ: ["yu"],
+  よ: ["yo"],
+
+  ら: ["ra"],
+  り: ["ri"],
+  る: ["ru"],
+  れ: ["re"],
+  ろ: ["ro"],
+
+  わ: ["wa"],
+  を: ["o", "wo"],
+  ん: ["n"],
+
+  が: ["ga"],
+  ぎ: ["gi"],
+  ぐ: ["gu"],
+  げ: ["ge"],
+  ご: ["go"],
+
+  ざ: ["za"],
+  じ: ["ji", "zi"],
+  ず: ["zu"],
+  ぜ: ["ze"],
+  ぞ: ["zo"],
+
+  だ: ["da"],
+  ぢ: ["ji", "di"],
+  づ: ["zu", "du"],
+  で: ["de"],
+  ど: ["do"],
+
+  ば: ["ba"],
+  び: ["bi"],
+  ぶ: ["bu"],
+  べ: ["be"],
+  ぼ: ["bo"],
+
+  ぱ: ["pa"],
+  ぴ: ["pi"],
+  ぷ: ["pu"],
+  ぺ: ["pe"],
+  ぽ: ["po"],
+
+  ぁ: ["a"],
+  ぃ: ["i"],
+  ぅ: ["u"],
+  ぇ: ["e"],
+  ぉ: ["o"],
+};
+
+const digraphRomajiMap: Record<string, string[]> = {
+  きゃ: ["kya"],
+  きゅ: ["kyu"],
+  きょ: ["kyo"],
+
+  しゃ: ["sha", "sya"],
+  しゅ: ["shu", "syu"],
+  しょ: ["sho", "syo"],
+
+  ちゃ: ["cha", "tya", "cya"],
+  ちゅ: ["chu", "tyu", "cyu"],
+  ちょ: ["cho", "tyo", "cyo"],
+
+  にゃ: ["nya"],
+  にゅ: ["nyu"],
+  にょ: ["nyo"],
+
+  ひゃ: ["hya"],
+  ひゅ: ["hyu"],
+  ひょ: ["hyo"],
+
+  みゃ: ["mya"],
+  みゅ: ["myu"],
+  みょ: ["myo"],
+
+  りゃ: ["rya"],
+  りゅ: ["ryu"],
+  りょ: ["ryo"],
+
+  ぎゃ: ["gya"],
+  ぎゅ: ["gyu"],
+  ぎょ: ["gyo"],
+
+  じゃ: ["ja", "jya", "zya"],
+  じゅ: ["ju", "jyu", "zyu"],
+  じょ: ["jo", "jyo", "zyo"],
+
+  ぢゃ: ["ja", "dya"],
+  ぢゅ: ["ju", "dyu"],
+  ぢょ: ["jo", "dyo"],
+
+  びゃ: ["bya"],
+  びゅ: ["byu"],
+  びょ: ["byo"],
+
+  ぴゃ: ["pya"],
+  ぴゅ: ["pyu"],
+  ぴょ: ["pyo"],
+};
+
+function getSyllableOptions(value: string, index: number) {
+  const twoChars = value.slice(index, index + 2);
+
+  if (digraphRomajiMap[twoChars]) {
+    return {
+      options: digraphRomajiMap[twoChars],
+      nextIndex: index + 2,
+    };
+  }
+
+  const oneChar = value[index];
+
+  return {
+    options: basicRomajiMap[oneChar] ?? [oneChar],
+    nextIndex: index + 1,
+  };
+}
+
+function getFirstConsonant(value: string) {
+  const first = value[0];
+
+  if (!first) return "";
+  if ("aeiou".includes(first)) return "";
+  if (first === "n") return "n";
+
+  return first;
+}
+
+function combineOptionSets(optionSets: string[][]) {
+  let results = [""];
+
+  for (const options of optionSets) {
+    const nextResults: string[] = [];
+
+    for (const current of results) {
+      for (const option of options) {
+        nextResults.push(current + option);
+      }
+    }
+
+    results = Array.from(new Set(nextResults));
+
+    if (results.length > 256) {
+      results = results.slice(0, 256);
+    }
+  }
+
+  return results;
+}
+
+function addLongVowelVariants(candidate: string) {
+  const normalized = normalizeRomaji(candidate);
+  const variants = new Set<string>();
+
+  variants.add(normalized);
+
+  variants.add(normalized.replace(/ou/g, "o"));
+  variants.add(normalized.replace(/oo/g, "o"));
+  variants.add(normalized.replace(/uu/g, "u"));
+  variants.add(normalized.replace(/aa/g, "a"));
+  variants.add(normalized.replace(/ii/g, "i"));
+  variants.add(normalized.replace(/ee/g, "e"));
+  variants.add(normalized.replace(/ei/g, "e"));
+
+  variants.add(
+    normalized
+      .replace(/aa/g, "a")
+      .replace(/ii/g, "i")
+      .replace(/uu/g, "u")
+      .replace(/ee/g, "e")
+      .replace(/oo/g, "o")
+  );
+
+  variants.add(
+    normalized
+      .replace(/ou/g, "o")
+      .replace(/ei/g, "e")
+      .replace(/aa/g, "a")
+      .replace(/ii/g, "i")
+      .replace(/uu/g, "u")
+      .replace(/ee/g, "e")
+      .replace(/oo/g, "o")
+  );
+
+  return Array.from(variants).filter(Boolean);
+}
+
+function hiraganaToRomajiCandidates(value: string) {
+  const hira = normalizeAnswer(value);
+
+  if (!hira || !hasKana(hira)) {
+    return [];
+  }
+
+  const optionSets: string[][] = [];
+  let index = 0;
+
+  while (index < hira.length) {
+    const char = hira[index];
+
+    if (char === "っ") {
+      const next = getSyllableOptions(hira, index + 1);
+      const doubledOptions = next.options
+        .map((option) => getFirstConsonant(option))
+        .filter(Boolean);
+
+      optionSets.push(doubledOptions.length > 0 ? doubledOptions : [""]);
+      index += 1;
+      continue;
+    }
+
+    if (char === "ん") {
+      const next = getSyllableOptions(hira, index + 1);
+      const nextStartsWithBmp = next.options.some((option) =>
+        /^[bmp]/.test(option)
+      );
+
+      optionSets.push(nextStartsWithBmp ? ["n", "m"] : ["n"]);
+      index += 1;
+      continue;
+    }
+
+    const syllable = getSyllableOptions(hira, index);
+    optionSets.push(syllable.options);
+    index = syllable.nextIndex;
+  }
+
+  const baseCandidates = combineOptionSets(optionSets);
+  const allCandidates = new Set<string>();
+
+  for (const candidate of baseCandidates) {
+    for (const variant of addLongVowelVariants(candidate)) {
+      allCandidates.add(variant);
+    }
+  }
+
+  return Array.from(allCandidates).filter(Boolean);
+}
+
 function judgeAnswer(params: {
   userAnswer: string;
   correctAnswer: string;
+  question: CourseQuestionRow;
 }) {
-  const { userAnswer, correctAnswer } = params;
+  const { userAnswer, correctAnswer, question } = params;
 
   const normalizedUserAnswer = normalizeAnswer(userAnswer);
 
@@ -213,10 +542,36 @@ function judgeAnswer(params: {
     return false;
   }
 
-  return correctAnswerCandidates.some((answer) => {
+  const kanaOrEnglishMatched = correctAnswerCandidates.some((answer) => {
     const normalizedCorrectAnswer = normalizeAnswer(answer);
     return normalizedUserAnswer === normalizedCorrectAnswer;
   });
+
+  if (kanaOrEnglishMatched) {
+    return true;
+  }
+
+  if (!isReadingQuestion(question)) {
+    return false;
+  }
+
+  if (!isLikelyRomaji(userAnswer)) {
+    return false;
+  }
+
+  const normalizedRomajiUserAnswer = normalizeRomaji(userAnswer);
+
+  if (!normalizedRomajiUserAnswer) {
+    return false;
+  }
+
+  const romajiCandidates = correctAnswerCandidates.flatMap((answer) =>
+    hiraganaToRomajiCandidates(answer)
+  );
+
+  return romajiCandidates.some(
+    (candidate) => normalizeRomaji(candidate) === normalizedRomajiUserAnswer
+  );
 }
 
 async function getKanjiHintForMeaningQuestion(params: {
@@ -787,6 +1142,7 @@ export async function POST(request: NextRequest) {
     const isCorrect = judgeAnswer({
       userAnswer,
       correctAnswer,
+      question: typedQuestion,
     });
 
     const attemptNumber = await getAttemptNumber({

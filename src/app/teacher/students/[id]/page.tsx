@@ -1,300 +1,1144 @@
-import Link from 'next/link'
-import { notFound } from 'next/navigation'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import Link from "next/link";
+import type { CSSProperties } from "react";
+import { notFound } from "next/navigation";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type StudentProgressRow = {
-  student_id: string
-  display_name: string | null
-  student_login_id: string | null
-  is_active: boolean | null
-  current_unit: string | null
-  last_order_completed: number | null
-}
-
-type WrongKanjiRow = {
-  student_id: string
-  display_name: string | null
-  student_login_id: string | null
-  kanji: string
-  answered_at: string | null
-}
+  student_id: string;
+  display_name: string | null;
+  student_login_id: string | null;
+  is_active: boolean | null;
+  current_unit: string | null;
+  last_order_completed: number | null;
+};
 
 type AttemptRow = {
-  kanji: string | null
-  is_correct: boolean | null
-  quiz_type: string | null
-  answered_at: string | null
-}
+  id: number;
+  student_account_id: string;
+  kanji: string;
+  unit: string;
+  order_in_unit: number;
+  quiz_type: string;
+  user_answer: string | null;
+  correct_answer: string | null;
+  is_correct: boolean;
+  answered_at: string | null;
+};
 
 type UnitProgressRow = {
-  unit: string
-  last_order_completed: number | null
-  is_completed: boolean | null
-  last_studied_at: string | null
+  unit: string;
+  last_order_completed: number | null;
+  is_completed: boolean | null;
+  last_studied_at: string | null;
+};
+
+type KanjiHintRow = {
+  unit: string;
+  kanji: string;
+  order_in_unit: number | null;
+};
+
+type QuestionMasterRow = {
+  id: number;
+  unit: string;
+  category: string;
+  question_type: string;
+  prompt: string;
+  translation_en: string | null;
+  answer_text: string | null;
+  answer_aliases: unknown;
+  target_text: string | null;
+  order_in_unit: number | null;
+  kanji_order_in_unit: number | null;
+  reading_variant_order: number | null;
+  hint_kanji_keys: string | null;
+};
+
+type MistakeHistoryItem = {
+  key: string;
+  kanji: string;
+  unit: string;
+  quiz_type: string;
+  review_status: "resolved" | "needs_review";
+};
+
+type UnitCardData = {
+  unit: string;
+  grade: number | null;
+  status: "completed" | "in_progress" | "not_started";
+  is_latest: boolean;
+  last_studied_at: string | null;
+  meaning_answered_count: number;
+  meaning_total_count: number;
+  reading_answered_count: number;
+  reading_total_count: number;
+  mistake_count: number;
+  unresolved_count: number;
+};
+
+type GradeGroup = {
+  grade: number;
+  units: UnitCardData[];
+  completed_count: number;
+  total_count: number;
+  mistake_count: number;
+  unresolved_count: number;
+  has_latest: boolean;
+};
+
+function formatShortDate(value: string | null) {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function formatDate(value: string | null) {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('ja-JP')
+function isMeaningQuiz(quizType: string | null | undefined) {
+  return String(quizType ?? "").includes("meaning");
+}
+
+function isReadingQuiz(quizType: string | null | undefined) {
+  const value = String(quizType ?? "");
+  return value.includes("reading") || value.includes("input");
+}
+
+function normalizeText(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[　]/g, "")
+    .replace(/[。、，,.!！?？]/g, "");
+}
+
+function parseAliases(value: unknown) {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item ?? "").trim()).filter(Boolean);
+      }
+    } catch {
+      return value
+        .split(new RegExp("[／/，、,\\n\\r;；|｜]+", "g"))
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+}
+
+function splitAnswerCandidates(value: string | null | undefined) {
+  if (!value) return [];
+
+  return String(value)
+    .split(new RegExp("[／/，、,\\n\\r;；|｜]+", "g"))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isReadingQuestionMaster(question: QuestionMasterRow) {
+  const category = String(question.category ?? "");
+  const questionType = String(question.question_type ?? "");
+
+  return (
+    category === "kanji" &&
+    (questionType.includes("input") ||
+      questionType.includes("reading") ||
+      Boolean(question.answer_text && /[ぁ-んァ-ン]/.test(question.answer_text)))
+  );
+}
+
+function getAttemptQuestionKey(attempt: AttemptRow) {
+  if (isMeaningQuiz(attempt.quiz_type)) {
+    return [attempt.unit, attempt.kanji, attempt.quiz_type].join("__");
+  }
+
+  return [
+    attempt.unit,
+    attempt.kanji,
+    attempt.quiz_type,
+    attempt.correct_answer ?? "",
+  ].join("__");
+}
+
+function getUniqueQuestionCount(attempts: AttemptRow[]) {
+  return new Set(attempts.map((attempt) => getAttemptQuestionKey(attempt))).size;
+}
+
+function getLatestStudiedAt(unitProgressList: UnitProgressRow[]) {
+  const dates = unitProgressList
+    .map((item) => item.last_studied_at)
+    .filter((value): value is string => Boolean(value))
+    .sort();
+
+  return dates.length > 0 ? dates[dates.length - 1] : null;
+}
+
+function getGradeFromUnit(unit: string) {
+  const match = unit.match(/grade(\d+)-kanji-/);
+  if (!match) return null;
+  return Number(match[1]);
+}
+
+function sortUnitNames(a: string, b: string) {
+  const pattern = /grade(\d+)-kanji-(\d+)/;
+  const aMatch = a.match(pattern);
+  const bMatch = b.match(pattern);
+
+  if (aMatch && bMatch) {
+    const aGrade = Number(aMatch[1]);
+    const bGrade = Number(bMatch[1]);
+    const aUnit = Number(aMatch[2]);
+    const bUnit = Number(bMatch[2]);
+
+    if (aGrade !== bGrade) return aGrade - bGrade;
+    return aUnit - bUnit;
+  }
+
+  return a.localeCompare(b);
+}
+
+function getUnitStatus(params: {
+  meaningAnswered: number;
+  meaningTotal: number;
+  readingAnswered: number;
+  readingTotal: number;
+}) {
+  const { meaningAnswered, meaningTotal, readingAnswered, readingTotal } = params;
+
+  const total = meaningTotal + readingTotal;
+  const answered = meaningAnswered + readingAnswered;
+
+  if (total > 0 && answered >= total) return "completed";
+  if (answered > 0) return "in_progress";
+  return "not_started";
+}
+
+function getStatusLabel(status: UnitCardData["status"]) {
+  if (status === "completed") return "完了";
+  if (status === "in_progress") return "途中";
+  return "未着手";
+}
+
+function getStatusStyle(status: UnitCardData["status"], isLatest: boolean) {
+  if (isLatest) {
+    return {
+      borderColor: "#6366f1",
+      background: "#eef2ff",
+    };
+  }
+
+  if (status === "completed") {
+    return {
+      borderColor: "#22c55e",
+      background: "#dcfce7",
+    };
+  }
+
+  if (status === "in_progress") {
+    return {
+      borderColor: "#facc15",
+      background: "#fef9c3",
+    };
+  }
+
+  return {
+    borderColor: "#60a5fa",
+    background: "#dbeafe",
+  };
+}
+
+function buildMistakeHistory(attempts: AttemptRow[]) {
+  const grouped = new Map<string, AttemptRow[]>();
+
+  for (const attempt of attempts) {
+    const key = getAttemptQuestionKey(attempt);
+    const list = grouped.get(key) ?? [];
+    list.push(attempt);
+    grouped.set(key, list);
+  }
+
+  const result: MistakeHistoryItem[] = [];
+
+  for (const [key, rows] of grouped) {
+    const sortedRows = [...rows].sort((a, b) => {
+      const timeA = new Date(a.answered_at ?? "").getTime();
+      const timeB = new Date(b.answered_at ?? "").getTime();
+
+      if (timeA !== timeB) return timeA - timeB;
+
+      return a.id - b.id;
+    });
+
+    const wrongRows = sortedRows.filter((row) => !row.is_correct);
+    if (wrongRows.length === 0) continue;
+
+    const firstWrong = wrongRows[0];
+    const latestAttempt = sortedRows[sortedRows.length - 1];
+
+    result.push({
+      key,
+      kanji: firstWrong.kanji,
+      unit: firstWrong.unit,
+      quiz_type: firstWrong.quiz_type,
+      review_status: latestAttempt.is_correct ? "resolved" : "needs_review",
+    });
+  }
+
+  return result;
+}
+
+function buildUnitCards(params: {
+  attempts: AttemptRow[];
+  unitProgressList: UnitProgressRow[];
+  kanjiHints: KanjiHintRow[];
+  readingQuestions: QuestionMasterRow[];
+  mistakeHistory: MistakeHistoryItem[];
+}) {
+  const {
+    attempts,
+    unitProgressList,
+    kanjiHints,
+    readingQuestions,
+    mistakeHistory,
+  } = params;
+
+  const latestStudiedAt = getLatestStudiedAt(unitProgressList);
+
+  const unitNames = Array.from(
+    new Set([
+      ...kanjiHints.map((row) => row.unit),
+      ...readingQuestions.map((row) => row.unit),
+      ...unitProgressList.map((row) => row.unit),
+      ...attempts.map((row) => row.unit),
+    ])
+  )
+    .filter(Boolean)
+    .sort(sortUnitNames);
+
+  return unitNames.map((unit): UnitCardData => {
+    const progress = unitProgressList.find((item) => item.unit === unit);
+
+    const unitAttempts = attempts.filter((attempt) => attempt.unit === unit);
+
+    const meaningAttempts = unitAttempts.filter((attempt) =>
+      isMeaningQuiz(attempt.quiz_type)
+    );
+
+    const readingAttempts = unitAttempts.filter((attempt) =>
+      isReadingQuiz(attempt.quiz_type)
+    );
+
+    const meaningTotal = kanjiHints.filter((row) => row.unit === unit).length;
+    const readingTotal = readingQuestions.filter((row) => row.unit === unit).length;
+
+    const meaningAnswered = getUniqueQuestionCount(meaningAttempts);
+    const readingAnswered = getUniqueQuestionCount(readingAttempts);
+
+    const unitMistakes = mistakeHistory.filter((item) => item.unit === unit);
+
+    const unresolved = unitMistakes.filter(
+      (item) => item.review_status === "needs_review"
+    );
+
+    const status = getUnitStatus({
+      meaningAnswered,
+      meaningTotal,
+      readingAnswered,
+      readingTotal,
+    });
+
+    const lastStudiedAt =
+      progress?.last_studied_at ??
+      unitAttempts
+        .map((attempt) => attempt.answered_at)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ??
+      null;
+
+    return {
+      unit,
+      grade: getGradeFromUnit(unit),
+      status,
+      is_latest: Boolean(lastStudiedAt) && lastStudiedAt === latestStudiedAt,
+      last_studied_at: lastStudiedAt,
+      meaning_answered_count: meaningAnswered,
+      meaning_total_count: meaningTotal,
+      reading_answered_count: readingAnswered,
+      reading_total_count: readingTotal,
+      mistake_count: unitMistakes.length,
+      unresolved_count: unresolved.length,
+    };
+  });
+}
+
+function buildGradeGroups(unitCards: UnitCardData[]) {
+  const map = new Map<number, UnitCardData[]>();
+
+  for (const unit of unitCards) {
+    const grade = unit.grade ?? 0;
+    const list = map.get(grade) ?? [];
+    list.push(unit);
+    map.set(grade, list);
+  }
+
+  const grades = Array.from(map.keys()).sort((a, b) => a - b);
+
+  return grades.map((grade): GradeGroup => {
+    const units = (map.get(grade) ?? []).sort((a, b) =>
+      sortUnitNames(a.unit, b.unit)
+    );
+
+    return {
+      grade,
+      units,
+      completed_count: units.filter((unit) => unit.status === "completed").length,
+      total_count: units.length,
+      mistake_count: units.reduce((sum, unit) => sum + unit.mistake_count, 0),
+      unresolved_count: units.reduce((sum, unit) => sum + unit.unresolved_count, 0),
+      has_latest: units.some((unit) => unit.is_latest),
+    };
+  });
+}
+
+function ErrorView({ message }: { message: string }) {
+  return (
+    <main style={styles.page}>
+      <div style={styles.shell}>
+        <section style={styles.errorCard}>
+          <p style={styles.label}>TEACHER DASHBOARD</p>
+          <h1 style={styles.title}>生徒詳細</h1>
+          <p style={styles.errorText}>{message}</p>
+
+          <div style={styles.errorActions}>
+            <Link href="/teacher/students" style={styles.secondaryButton}>
+              生徒一覧に戻る
+            </Link>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
 }
 
 export default async function TeacherStudentDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>
+  params: Promise<{ id: string }>;
 }) {
-  const { id } = await params
-  const db = supabaseAdmin as any
+  const { id } = await params;
+  const db = supabaseAdmin as any;
 
   const { data: student, error: studentError } = await db
-    .from('teacher_student_progress_view')
-    .select('*')
-    .eq('student_id', id)
-    .maybeSingle()
+    .from("teacher_student_progress_view")
+    .select("*")
+    .eq("student_id", id)
+    .maybeSingle();
 
   if (studentError) {
     return (
-      <main className="min-h-screen bg-slate-50 p-6">
-        <div className="mx-auto max-w-5xl rounded-2xl bg-white p-6 shadow">
-          <p className="text-red-600">
-            Failed to load student detail: {studentError.message}
-          </p>
-        </div>
-      </main>
-    )
+      <ErrorView
+        message={`生徒の詳細を読み込めませんでした：${studentError.message}`}
+      />
+    );
   }
 
   if (!student) {
-    notFound()
+    notFound();
   }
-
-  const { data: wrongRows, error: wrongError } = await db
-    .from('teacher_wrong_kanji_view')
-    .select('*')
-    .eq('student_id', id)
-    .order('answered_at', { ascending: false })
 
   const { data: attempts, error: attemptsError } = await db
-    .from('kanji_attempts')
-    .select('kanji, is_correct, quiz_type, answered_at')
-    .eq('student_account_id', id)
-    .order('answered_at', { ascending: false })
-    .limit(20)
+    .from("kanji_attempts")
+    .select(
+      "id, student_account_id, kanji, unit, order_in_unit, quiz_type, user_answer, correct_answer, is_correct, answered_at"
+    )
+    .eq("student_account_id", id)
+    .order("answered_at", { ascending: false })
+    .limit(5000);
 
   const { data: unitProgressRows, error: unitProgressError } = await db
-    .from('student_kanji_progress')
-    .select('unit, last_order_completed, is_completed, last_studied_at')
-    .eq('student_account_id', id)
-    .order('unit', { ascending: true })
+    .from("student_kanji_progress")
+    .select("unit, last_order_completed, is_completed, last_studied_at")
+    .eq("student_account_id", id)
+    .order("unit", { ascending: true });
 
-  if (wrongError) {
-    return (
-      <main className="min-h-screen bg-slate-50 p-6">
-        <div className="mx-auto max-w-5xl rounded-2xl bg-white p-6 shadow">
-          <p className="text-red-600">
-            Failed to load wrong answers: {wrongError.message}
-          </p>
-        </div>
-      </main>
+  const { data: kanjiHintsRaw, error: kanjiHintsError } = await db
+    .from("kanji_hints")
+    .select("unit, kanji, order_in_unit")
+    .order("unit", { ascending: true })
+    .order("order_in_unit", { ascending: true });
+
+  const { data: readingQuestionsRaw, error: readingQuestionsError } = await db
+    .from("questions_master")
+    .select(
+      `
+      id,
+      unit,
+      category,
+      question_type,
+      prompt,
+      translation_en,
+      answer_text,
+      answer_aliases,
+      target_text,
+      order_in_unit,
+      kanji_order_in_unit,
+      reading_variant_order,
+      hint_kanji_keys
+    `
     )
-  }
+    .eq("is_published", true)
+    .eq("category", "kanji");
 
   if (attemptsError) {
     return (
-      <main className="min-h-screen bg-slate-50 p-6">
-        <div className="mx-auto max-w-5xl rounded-2xl bg-white p-6 shadow">
-          <p className="text-red-600">
-            Failed to load attempt history: {attemptsError.message}
-          </p>
-        </div>
-      </main>
-    )
+      <ErrorView
+        message={`回答履歴を読み込めませんでした：${attemptsError.message}`}
+      />
+    );
   }
 
   if (unitProgressError) {
     return (
-      <main className="min-h-screen bg-slate-50 p-6">
-        <div className="mx-auto max-w-5xl rounded-2xl bg-white p-6 shadow">
-          <p className="text-red-600">
-            Failed to load unit progress: {unitProgressError.message}
-          </p>
-        </div>
-      </main>
-    )
+      <ErrorView
+        message={`ユニット別進捗を読み込めませんでした：${unitProgressError.message}`}
+      />
+    );
   }
 
-  const studentData: StudentProgressRow = student
-  const wrongList: WrongKanjiRow[] = wrongRows ?? []
-  const attemptList: AttemptRow[] = attempts ?? []
-  const unitProgressList: UnitProgressRow[] = unitProgressRows ?? []
+  if (kanjiHintsError) {
+    return (
+      <ErrorView
+        message={`漢字ヒントデータを読み込めませんでした：${kanjiHintsError.message}`}
+      />
+    );
+  }
+
+  if (readingQuestionsError) {
+    return (
+      <ErrorView
+        message={`読みクイズ問題データを読み込めませんでした：${readingQuestionsError.message}`}
+      />
+    );
+  }
+
+  const studentData: StudentProgressRow = student;
+  const attemptList: AttemptRow[] = attempts ?? [];
+  const unitProgressList: UnitProgressRow[] = unitProgressRows ?? [];
+  const kanjiHints: KanjiHintRow[] = kanjiHintsRaw ?? [];
+  const readingQuestions: QuestionMasterRow[] = (readingQuestionsRaw ?? []).filter(
+    (question: QuestionMasterRow) => isReadingQuestionMaster(question)
+  );
+
+  const mistakeHistory = buildMistakeHistory(attemptList);
+
+  const unitCards = buildUnitCards({
+    attempts: attemptList,
+    unitProgressList,
+    kanjiHints,
+    readingQuestions,
+    mistakeHistory,
+  });
+
+  const gradeGroups = buildGradeGroups(unitCards);
+
+  const totalUnits = unitCards.length;
+  const completedUnits = unitCards.filter(
+    (unit) => unit.status === "completed"
+  ).length;
+
+  const startedUnits = unitCards.filter(
+    (unit) => unit.status !== "not_started"
+  ).length;
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-4">
-          <Link
-            href="/teacher/students"
-            className="inline-flex rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow hover:bg-slate-100"
-          >
-            ← Back to students
-          </Link>
-        </div>
+    <main style={styles.page}>
+      <div style={styles.shell}>
+        <header style={styles.header}>
+          <div>
+            <p style={styles.label}>TEACHER DASHBOARD</p>
+            <h1 style={styles.title}>{studentData.display_name || "名前なし"}</h1>
+            <p style={styles.subtitle}>
+              Login ID：{studentData.student_login_id || "-"}
+            </p>
+          </div>
 
-        <div className="mb-6 rounded-3xl bg-teal-600 px-6 py-5 text-white shadow-lg">
-          <h1 className="text-2xl font-bold sm:text-3xl">
-            {studentData.display_name || 'No name'}
-          </h1>
-          <p className="mt-2 text-sm text-teal-50 sm:text-base">
-            Login ID: {studentData.student_login_id || '-'}
-          </p>
-        </div>
+          <div style={styles.headerActions}>
+            <Link href={`/teacher/students/${id}`} style={styles.primaryButton}>
+              更新
+            </Link>
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          <section className="rounded-3xl bg-white p-6 shadow-lg">
-            <h2 className="text-lg font-semibold text-slate-800">Current Progress</h2>
+            <Link href="/teacher/students" style={styles.secondaryButton}>
+              生徒一覧に戻る
+            </Link>
+          </div>
+        </header>
 
-            <dl className="mt-4 space-y-3 text-sm">
-              <div>
-                <dt className="font-medium text-slate-500">Current unit</dt>
-                <dd className="mt-1 text-slate-800">{studentData.current_unit || '-'}</dd>
-              </div>
+        <section style={styles.summaryGrid}>
+          <div style={styles.summaryCard}>
+            <p style={styles.summaryLabel}>完了ユニット</p>
+            <strong style={styles.summaryValue}>
+              {completedUnits}/{totalUnits}
+            </strong>
+          </div>
 
-              <div>
-                <dt className="font-medium text-slate-500">Last completed order</dt>
-                <dd className="mt-1 text-slate-800">
-                  {studentData.last_order_completed ?? 0}
-                </dd>
-              </div>
+          <div style={styles.summaryCard}>
+            <p style={styles.summaryLabel}>着手済みユニット</p>
+            <strong style={styles.summaryValue}>{startedUnits}</strong>
+          </div>
 
-              <div>
-                <dt className="font-medium text-slate-500">Status</dt>
-                <dd className="mt-1">
-                  {studentData.is_active ? (
-                    <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                      Active
-                    </span>
-                  ) : (
-                    <span className="inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
-                      Inactive
-                    </span>
-                  )}
-                </dd>
-              </div>
-            </dl>
-          </section>
+          <div style={styles.summaryCard}>
+            <p style={styles.summaryLabel}>回答数</p>
+            <strong style={styles.summaryValue}>{attemptList.length}</strong>
+          </div>
 
-          <section className="rounded-3xl bg-white p-6 shadow-lg lg:col-span-2">
-            <h2 className="text-lg font-semibold text-slate-800">Wrong Answers Remaining</h2>
-
-            {wrongList.length === 0 ? (
-              <p className="mt-4 text-sm text-slate-600">
-                No remaining wrong answers. Great job.
-              </p>
-            ) : (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {wrongList.map((item, index) => (
-                  <div
-                    key={`${item.kanji}-${index}`}
-                    className="rounded-2xl bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800"
-                  >
-                    {item.kanji}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-
-        <section className="mt-6 rounded-3xl bg-white p-6 shadow-lg">
-          <h2 className="text-lg font-semibold text-slate-800">Progress by Unit</h2>
-
-          {unitProgressList.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-600">No unit progress yet.</p>
-          ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-100 text-slate-700">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">Unit</th>
-                    <th className="px-4 py-3 font-semibold">Last completed order</th>
-                    <th className="px-4 py-3 font-semibold">Last studied</th>
-                    <th className="px-4 py-3 font-semibold">Completed</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {unitProgressList.map((item) => (
-                    <tr key={item.unit} className="border-t border-slate-100">
-                      <td className="px-4 py-3 text-slate-800">{item.unit}</td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {item.last_order_completed ?? 0}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {formatDate(item.last_studied_at)}
-                      </td>
-                      <td className="px-4 py-3">
-                        {item.is_completed ? (
-                          <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                            Yes
-                          </span>
-                        ) : (
-                          <span className="inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
-                            No
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <div style={styles.summaryCard}>
+            <p style={styles.summaryLabel}>一度でも間違えた問題</p>
+            <strong
+              style={{
+                ...styles.summaryValue,
+                color: mistakeHistory.length > 0 ? "#b45309" : "#15803d",
+              }}
+            >
+              {mistakeHistory.length}
+            </strong>
+          </div>
         </section>
 
-        <section className="mt-6 rounded-3xl bg-white p-6 shadow-lg">
-          <h2 className="text-lg font-semibold text-slate-800">Recent Attempts</h2>
+        <section style={styles.card}>
+          <div style={styles.cardHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>グレード別進捗</h2>
+              <p style={styles.sectionSubText}>
+                グレードを開くと、ユニットごとの進捗が表示されます。
+              </p>
+            </div>
+          </div>
 
-          {attemptList.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-600">No attempts yet.</p>
+          <div style={styles.legendRow}>
+            <span style={styles.legendItem}>
+              <i style={{ ...styles.legendDot, background: "#22c55e" }} />
+              完了
+            </span>
+            <span style={styles.legendItem}>
+              <i style={{ ...styles.legendDot, background: "#facc15" }} />
+              途中
+            </span>
+            <span style={styles.legendItem}>
+              <i style={{ ...styles.legendDot, background: "#60a5fa" }} />
+              未着手
+            </span>
+            <span style={styles.legendItem}>
+              <i style={{ ...styles.legendDot, background: "#6366f1" }} />
+              最近学習
+            </span>
+          </div>
+
+          {gradeGroups.length === 0 ? (
+            <p style={styles.emptyText}>まだ進捗はありません。</p>
           ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-100 text-slate-700">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">Kanji</th>
-                    <th className="px-4 py-3 font-semibold">Result</th>
-                    <th className="px-4 py-3 font-semibold">Quiz Type</th>
-                    <th className="px-4 py-3 font-semibold">Answered At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attemptList.map((attempt, index) => (
-                    <tr key={index} className="border-t border-slate-100">
-                      <td className="px-4 py-3 text-slate-800">{attempt.kanji || '-'}</td>
-                      <td className="px-4 py-3">
-                        {attempt.is_correct ? (
-                          <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                            Correct
-                          </span>
-                        ) : (
-                          <span className="inline-flex rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700">
-                            Wrong
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{attempt.quiz_type || '-'}</td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {formatDate(attempt.answered_at)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={styles.gradeList}>
+              {gradeGroups.map((gradeGroup) => (
+                <details
+                  key={gradeGroup.grade}
+                  open={gradeGroup.has_latest}
+                  style={styles.gradeDetails}
+                >
+                  <summary style={styles.gradeSummary}>
+                    <div style={styles.gradeSummaryMain}>
+                      <strong style={styles.gradeTitle}>
+                        Grade {gradeGroup.grade}
+                      </strong>
+
+                      {gradeGroup.has_latest ? (
+                        <span style={styles.latestUnitBadge}>最近学習</span>
+                      ) : null}
+                    </div>
+
+                    <div style={styles.gradeStats}>
+                      <span>完了 {gradeGroup.completed_count}/{gradeGroup.total_count}</span>
+                      <span>間違い {gradeGroup.mistake_count}</span>
+                      <span>要確認 {gradeGroup.unresolved_count}</span>
+                    </div>
+                  </summary>
+
+                  <div style={styles.unitGrid}>
+                    {gradeGroup.units.map((unit) => {
+                      const statusStyle = getStatusStyle(
+                        unit.status,
+                        unit.is_latest
+                      );
+                      const hasMistakes = unit.mistake_count > 0;
+
+                      return (
+                        <article
+                          key={unit.unit}
+                          style={{
+                            ...styles.unitCard,
+                            borderColor: statusStyle.borderColor,
+                            background: statusStyle.background,
+                          }}
+                        >
+                          <div style={styles.unitTop}>
+                            <div>
+                              <strong style={styles.unitName}>{unit.unit}</strong>
+                              <div style={styles.unitStatusLine}>
+                                <span style={styles.unitStatusText}>
+                                  {getStatusLabel(unit.status)}
+                                </span>
+                                {unit.is_latest ? (
+                                  <span style={styles.latestUnitBadge}>
+                                    最近学習
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <span style={styles.unitDate}>
+                              {formatShortDate(unit.last_studied_at)}
+                            </span>
+                          </div>
+
+                          <div style={styles.unitSimpleStats}>
+                            <div style={styles.unitMiniBox}>
+                              <span style={styles.miniLabel}>意味</span>
+                              <strong style={styles.miniValue}>
+                                {unit.meaning_answered_count}/
+                                {unit.meaning_total_count}
+                              </strong>
+                            </div>
+
+                            <div style={styles.unitMiniBox}>
+                              <span style={styles.miniLabel}>読み</span>
+                              <strong style={styles.miniValue}>
+                                {unit.reading_answered_count}/
+                                {unit.reading_total_count}
+                              </strong>
+                            </div>
+
+                            <div
+                              style={{
+                                ...styles.unitMiniBox,
+                                background: hasMistakes ? "#fff7ed" : "#f0fdf4",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  ...styles.miniLabel,
+                                  color: hasMistakes ? "#c2410c" : "#15803d",
+                                }}
+                              >
+                                一度でも間違えた問題
+                              </span>
+                              <strong
+                                style={{
+                                  ...styles.miniValue,
+                                  color: hasMistakes ? "#c2410c" : "#15803d",
+                                }}
+                              >
+                                {unit.mistake_count}
+                              </strong>
+                            </div>
+                          </div>
+
+                          {hasMistakes ? (
+                            <Link
+                              href={`/teacher/students/${id}/mistakes?unit=${encodeURIComponent(
+                                unit.unit
+                              )}`}
+                              style={styles.mistakeLink}
+                            >
+                              間違えた問題を見る
+                            </Link>
+                          ) : (
+                            <div style={styles.noMistakeText}>間違いなし</div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </details>
+              ))}
             </div>
           )}
         </section>
       </div>
     </main>
-  )
+  );
 }
+
+const styles: Record<string, CSSProperties> = {
+  page: {
+    minHeight: "100vh",
+    background: "#f1f5f9",
+    color: "#0f172a",
+    padding: "28px 18px",
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  },
+
+  shell: {
+    width: "min(1280px, 100%)",
+    margin: "0 auto",
+  },
+
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 20,
+    marginBottom: 24,
+  },
+
+  label: {
+    margin: "0 0 8px",
+    color: "#6366f1",
+    fontSize: 13,
+    fontWeight: 900,
+    letterSpacing: "0.18em",
+  },
+
+  title: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: "clamp(34px, 5vw, 58px)",
+    lineHeight: 1.05,
+    fontWeight: 950,
+    letterSpacing: "-0.05em",
+  },
+
+  subtitle: {
+    margin: "14px 0 0",
+    color: "#64748b",
+    fontSize: 17,
+    fontWeight: 850,
+  },
+
+  headerActions: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+
+  primaryButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 16,
+    background: "#0f172a",
+    color: "#ffffff",
+    padding: "14px 20px",
+    textDecoration: "none",
+    fontSize: 14,
+    fontWeight: 950,
+  },
+
+  secondaryButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 16,
+    background: "#ffffff",
+    color: "#334155",
+    padding: "14px 20px",
+    textDecoration: "none",
+    fontSize: 14,
+    fontWeight: 950,
+    boxShadow: "0 10px 26px rgba(15, 23, 42, 0.08)",
+    border: "1px solid rgba(148, 163, 184, 0.25)",
+  },
+
+  summaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+    gap: 16,
+    marginBottom: 18,
+  },
+
+  summaryCard: {
+    background: "#ffffff",
+    borderRadius: 24,
+    padding: 22,
+    boxShadow: "0 14px 34px rgba(15, 23, 42, 0.08)",
+    border: "1px solid rgba(148, 163, 184, 0.22)",
+  },
+
+  summaryLabel: {
+    margin: "0 0 12px",
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: 900,
+  },
+
+  summaryValue: {
+    display: "block",
+    color: "#0f172a",
+    fontSize: 34,
+    fontWeight: 950,
+    lineHeight: 1,
+  },
+
+  card: {
+    background: "#ffffff",
+    borderRadius: 28,
+    padding: 24,
+    marginBottom: 18,
+    boxShadow: "0 16px 38px rgba(15, 23, 42, 0.08)",
+    border: "1px solid rgba(148, 163, 184, 0.22)",
+  },
+
+  cardHeader: {
+    marginBottom: 18,
+  },
+
+  sectionTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 22,
+    fontWeight: 950,
+    letterSpacing: "-0.03em",
+  },
+
+  sectionSubText: {
+    margin: "8px 0 0",
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: 800,
+    lineHeight: 1.7,
+  },
+
+  legendRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "10px 16px",
+    marginBottom: 18,
+    padding: "12px 14px",
+    borderRadius: 18,
+    background: "#f8fafc",
+  },
+
+  legendItem: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 7,
+    color: "#334155",
+    fontSize: 13,
+    fontWeight: 900,
+  },
+
+  legendDot: {
+    width: 13,
+    height: 13,
+    borderRadius: 999,
+    display: "inline-block",
+  },
+
+  gradeList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+  },
+
+  gradeDetails: {
+    borderRadius: 24,
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    overflow: "hidden",
+  },
+
+  gradeSummary: {
+    cursor: "pointer",
+    padding: "18px 20px",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 16,
+    alignItems: "center",
+    listStyle: "none",
+  },
+
+  gradeSummaryMain: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+
+  gradeTitle: {
+    color: "#0f172a",
+    fontSize: 24,
+    fontWeight: 950,
+  },
+
+  gradeStats: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    color: "#475569",
+    fontSize: 13,
+    fontWeight: 900,
+  },
+
+  unitGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+    gap: 12,
+    padding: "0 16px 16px",
+  },
+
+  unitCard: {
+    border: "3px solid #cbd5e1",
+    borderRadius: 22,
+    padding: 14,
+  },
+
+  unitTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 12,
+  },
+
+  unitName: {
+    display: "block",
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: 950,
+    lineHeight: 1.25,
+    wordBreak: "break-word",
+  },
+
+  unitStatusLine: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    flexWrap: "wrap",
+  },
+
+  unitStatusText: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: 950,
+  },
+
+  latestUnitBadge: {
+    display: "inline-flex",
+    borderRadius: 999,
+    padding: "4px 8px",
+    background: "#6366f1",
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: 950,
+    whiteSpace: "nowrap",
+  },
+
+  unitDate: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: 850,
+    whiteSpace: "nowrap",
+  },
+
+  unitSimpleStats: {
+    display: "grid",
+    gridTemplateColumns: "1fr",
+    gap: 8,
+  },
+
+  unitMiniBox: {
+    background: "rgba(255,255,255,0.75)",
+    borderRadius: 14,
+    padding: "10px 11px",
+  },
+
+  miniLabel: {
+    display: "block",
+    marginBottom: 5,
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: 900,
+  },
+
+  miniValue: {
+    display: "block",
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: 950,
+  },
+
+  mistakeLink: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 12,
+    borderRadius: 14,
+    padding: "10px 12px",
+    background: "#0f172a",
+    color: "#ffffff",
+    textDecoration: "none",
+    fontSize: 13,
+    fontWeight: 950,
+  },
+
+  noMistakeText: {
+    marginTop: 12,
+    borderRadius: 14,
+    padding: "10px 12px",
+    background: "rgba(255,255,255,0.75)",
+    color: "#15803d",
+    fontSize: 13,
+    fontWeight: 950,
+    textAlign: "center",
+  },
+
+  emptyText: {
+    margin: 0,
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: 800,
+  },
+
+  errorCard: {
+    background: "#ffffff",
+    borderRadius: 28,
+    padding: 36,
+    textAlign: "center",
+    boxShadow: "0 16px 38px rgba(15, 23, 42, 0.08)",
+    border: "1px solid rgba(148, 163, 184, 0.22)",
+  },
+
+  errorText: {
+    margin: "20px 0 0",
+    background: "#fef2f2",
+    color: "#dc2626",
+    borderRadius: 18,
+    padding: "14px 16px",
+    fontSize: 14,
+    fontWeight: 850,
+    lineHeight: 1.7,
+  },
+
+  errorActions: {
+    marginTop: 18,
+    display: "flex",
+    justifyContent: "center",
+  },
+};
