@@ -40,7 +40,6 @@ type ReadingQuestionLookupRow = {
   id: string | number | null;
   unit: string | null;
   kanji_order_in_unit: number | null;
-  hint_kanji_keys: unknown;
 };
 
 type LevelStatus = {
@@ -60,47 +59,6 @@ function normalizeText(value: unknown): string {
 function normalizeNumber(value: unknown): number {
   const num = Number(value ?? 0);
   return Number.isFinite(num) ? num : 0;
-}
-
-function parseLooseJsonArray(value: unknown): string[] {
-  if (value == null) return [];
-
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item).trim()).filter(Boolean);
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return [String(value).trim()].filter(Boolean);
-  }
-
-  if (typeof value !== "string") return [];
-
-  const text = value.trim();
-  if (!text || text === "null") return [];
-
-  try {
-    const parsed = JSON.parse(text);
-
-    if (Array.isArray(parsed)) {
-      return parsed
-        .map((item) => {
-          if (typeof item === "string") return item.trim();
-
-          if (item && typeof item === "object") {
-            const obj = item as Record<string, unknown>;
-            return normalizeText(obj.kanji) || normalizeText(obj.text);
-          }
-
-          return String(item).trim();
-        })
-        .filter(Boolean);
-    }
-  } catch {}
-
-  return text
-    .split(/[、,\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function sortByLastStudiedDesc<T extends { last_studied_at: string | null }>(
@@ -246,6 +204,72 @@ async function fetchAllPublishedKanjiHints(db: any): Promise<KanjiHintRow[]> {
   return allRows;
 }
 
+
+async function fetchAllStudentReadingHistory(
+  db: any,
+  studentAccountId: string
+): Promise<ReadingHistoryRow[]> {
+  const pageSize = 1000;
+  let from = 0;
+  const allRows: ReadingHistoryRow[] = [];
+
+  while (true) {
+    const to = from + pageSize - 1;
+
+    const { data, error } = await db
+      .from("student_reading_question_history")
+      .select("question_id, unit, kanji_order_in_unit, shown_count, last_shown_at")
+      .eq("student_account_id", studentAccountId)
+      .range(from, to);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const rows = (data ?? []) as ReadingHistoryRow[];
+    allRows.push(...rows);
+
+    if (rows.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return allRows;
+}
+
+async function fetchReadingQuestionLookupRowsByIds(
+  db: any,
+  questionIds: string[]
+): Promise<ReadingQuestionLookupRow[]> {
+  const uniqueIds = Array.from(new Set(questionIds.map(normalizeText).filter(Boolean)));
+
+  if (uniqueIds.length === 0) {
+    return [];
+  }
+
+  const chunkSize = 500;
+  const allRows: ReadingQuestionLookupRow[] = [];
+
+  for (let index = 0; index < uniqueIds.length; index += chunkSize) {
+    const chunk = uniqueIds.slice(index, index + chunkSize);
+
+    const { data, error } = await db
+      .from("questions_master")
+      .select("id, unit, kanji_order_in_unit")
+      .in("id", chunk);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    allRows.push(...((data ?? []) as ReadingQuestionLookupRow[]));
+  }
+
+  return allRows;
+}
+
 function addMeaningLearnedKanji(params: {
   learnedKanjiSet: Set<string>;
   progressRows: ProgressRow[];
@@ -275,7 +299,6 @@ function addReadingLearnedKanji(params: {
   learnedKanjiSet: Set<string>;
   readingHistoryRows: ReadingHistoryRow[];
   readingQuestionMap: Map<string, ReadingQuestionLookupRow>;
-  kanjiSet: Set<string>;
   kanjiByUnitOrder: Map<string, string>;
   hintsByUnit: Map<string, KanjiHintRow[]>;
   readingProgressRows: ProgressRow[];
@@ -284,38 +307,36 @@ function addReadingLearnedKanji(params: {
     learnedKanjiSet,
     readingHistoryRows,
     readingQuestionMap,
-    kanjiSet,
     kanjiByUnitOrder,
     hintsByUnit,
     readingProgressRows,
   } = params;
 
   for (const history of readingHistoryRows) {
-    const questionId = normalizeText(history.question_id);
-    if (!questionId) continue;
+    const hasActuallySeenQuestion =
+      normalizeNumber(history.shown_count) > 0 ||
+      normalizeText(history.last_shown_at) !== "";
 
-    const question = readingQuestionMap.get(questionId);
-
-    const hintKeys = parseLooseJsonArray(question?.hint_kanji_keys).filter(
-      (key) => kanjiSet.has(key)
-    );
-
-    if (hintKeys.length > 0) {
-      for (const key of hintKeys) {
-        learnedKanjiSet.add(key);
-      }
+    if (!hasActuallySeenQuestion) {
       continue;
     }
+
+    const questionId = normalizeText(history.question_id);
+    const question = questionId ? readingQuestionMap.get(questionId) : null;
 
     const unit = normalizeText(question?.unit) || normalizeText(history.unit);
     const kanjiOrder =
       normalizeNumber(question?.kanji_order_in_unit) ||
       normalizeNumber(history.kanji_order_in_unit);
 
-    const fallbackKanji = kanjiByUnitOrder.get(`${unit}::${kanjiOrder}`);
+    if (!unit || kanjiOrder <= 0) {
+      continue;
+    }
 
-    if (fallbackKanji) {
-      learnedKanjiSet.add(fallbackKanji);
+    const learnedKanji = kanjiByUnitOrder.get(`${unit}::${kanjiOrder}`);
+
+    if (learnedKanji) {
+      learnedKanjiSet.add(learnedKanji);
     }
   }
 
@@ -336,7 +357,6 @@ function addReadingLearnedKanji(params: {
     }
   }
 }
-
 export default async function StudentHomePage() {
   const session = await getStudentSession();
 
@@ -351,8 +371,7 @@ export default async function StudentHomePage() {
     kanjiHintRows,
     { data: meaningProgressRowsRaw },
     { data: readingProgressRowsRaw },
-    { data: readingHistoryRowsRaw },
-    { data: readingQuestionRowsRaw },
+    readingHistoryRows,
   ] = await Promise.all([
     db
       .from("student_accounts")
@@ -379,25 +398,21 @@ export default async function StudentHomePage() {
       .eq("difficulty_tier", "normal")
       .in("unit", ALL_KANJI_UNIT_IDS),
 
-    db
-      .from("student_reading_question_history")
-      .select("question_id, unit, kanji_order_in_unit, shown_count, last_shown_at")
-      .eq("student_account_id", session.studentAccountId),
-
-    db
-      .from("questions_master")
-      .select("id, unit, kanji_order_in_unit, hint_kanji_keys")
-      .eq("is_published", true)
-      .eq("difficulty_tier", "normal")
-      .in("unit", ALL_KANJI_UNIT_IDS),
+    fetchAllStudentReadingHistory(db, session.studentAccountId),
   ]);
+
+  const readingQuestionIds = Array.from(
+    new Set(readingHistoryRows.map((row) => normalizeText(row.question_id)).filter(Boolean))
+  );
+
+  const readingQuestionRows = await fetchReadingQuestionLookupRowsByIds(
+    db,
+    readingQuestionIds
+  );
 
   const account = accountRaw as AccountRow | null;
   const meaningProgressRows = (meaningProgressRowsRaw ?? []) as ProgressRow[];
   const readingProgressRows = (readingProgressRowsRaw ?? []) as ProgressRow[];
-  const readingHistoryRows = (readingHistoryRowsRaw ?? []) as ReadingHistoryRow[];
-  const readingQuestionRows = (readingQuestionRowsRaw ??
-    []) as ReadingQuestionLookupRow[];
 
   const { kanjiSet, hintsByUnit, kanjiByUnitOrder } =
     buildKanjiIndexes(kanjiHintRows);
@@ -445,33 +460,48 @@ export default async function StudentHomePage() {
     };
   }
 
-  const learnedKanjiSet = new Set<string>();
+  const meaningLearnedKanjiSet = new Set<string>();
+  const readingLearnedKanjiSet = new Set<string>();
 
   addMeaningLearnedKanji({
-    learnedKanjiSet,
+    learnedKanjiSet: meaningLearnedKanjiSet,
     progressRows: meaningProgressRows,
     hintsByUnit,
   });
 
   addReadingLearnedKanji({
-    learnedKanjiSet,
+    learnedKanjiSet: readingLearnedKanjiSet,
     readingHistoryRows,
     readingQuestionMap,
-    kanjiSet,
     kanjiByUnitOrder,
     hintsByUnit,
     readingProgressRows,
   });
 
-  const learnedKanjiCount = Array.from(learnedKanjiSet).filter((kanji) =>
-    kanjiSet.has(kanji)
-  ).length;
-
   const totalKanjiCount = kanjiSet.size;
 
-  const progressPercent =
+  const meaningLearnedKanjiCount = Array.from(meaningLearnedKanjiSet).filter(
+    (kanji) => kanjiSet.has(kanji)
+  ).length;
+
+  const readingLearnedKanjiCount = Array.from(readingLearnedKanjiSet).filter(
+    (kanji) => kanjiSet.has(kanji)
+  ).length;
+
+  const meaningProgressPercent =
     totalKanjiCount > 0
-      ? Math.min(100, Math.round((learnedKanjiCount / totalKanjiCount) * 100))
+      ? Math.min(
+          100,
+          Math.round((meaningLearnedKanjiCount / totalKanjiCount) * 100)
+        )
+      : 0;
+
+  const readingProgressPercent =
+    totalKanjiCount > 0
+      ? Math.min(
+          100,
+          Math.round((readingLearnedKanjiCount / totalKanjiCount) * 100)
+        )
       : 0;
 
   const continueMeaningUnit = getContinueUnit(
@@ -508,24 +538,60 @@ export default async function StudentHomePage() {
           <div style={styles.progressMainRow}>
             <div style={styles.progressTextBlock}>
               <p style={styles.progressLabel}>ここまで学習した漢字</p>
-              <p style={styles.progressNumber}>
-                {learnedKanjiCount} / {totalKanjiCount}
-              </p>
+              <p style={styles.progressNote}>意味と読みを別々に表示しています</p>
             </div>
 
             <p style={styles.encourageText}>✨ その調子！</p>
           </div>
 
-          <div
-            style={styles.progressBarTrack}
-            aria-label={`Kanji progress ${progressPercent}%`}
-          >
-            <div
-              style={{
-                ...styles.progressBarFill,
-                width: `${progressPercent}%`,
-              }}
-            />
+          <div style={styles.progressSplitGrid}>
+            <div style={{ ...styles.progressMetricCard, ...styles.meaningProgressCard }}>
+              <div style={styles.progressMetricTop}>
+                <span style={styles.progressMetricLabel}>意味</span>
+                <span style={styles.progressMetricSub}>Meaning</span>
+              </div>
+
+              <p style={styles.progressMetricNumber}>
+                {meaningLearnedKanjiCount} / {totalKanjiCount}
+              </p>
+
+              <div
+                style={styles.progressBarTrack}
+                aria-label={`Meaning quiz kanji progress ${meaningProgressPercent}%`}
+              >
+                <div
+                  style={{
+                    ...styles.progressBarFill,
+                    ...styles.meaningProgressFill,
+                    width: `${meaningProgressPercent}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ ...styles.progressMetricCard, ...styles.readingProgressCard }}>
+              <div style={styles.progressMetricTop}>
+                <span style={styles.progressMetricLabel}>読み</span>
+                <span style={styles.progressMetricSub}>Reading</span>
+              </div>
+
+              <p style={styles.progressMetricNumber}>
+                {readingLearnedKanjiCount} / {totalKanjiCount}
+              </p>
+
+              <div
+                style={styles.progressBarTrack}
+                aria-label={`Reading quiz kanji progress ${readingProgressPercent}%`}
+              >
+                <div
+                  style={{
+                    ...styles.progressBarFill,
+                    ...styles.readingProgressFill,
+                    width: `${readingProgressPercent}%`,
+                  }}
+                />
+              </div>
+            </div>
           </div>
 
           <p style={styles.smallStepText}>
@@ -715,6 +781,63 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#6d7c90",
   },
 
+  progressNote: {
+    margin: "3px 0 0",
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#6d7c90",
+  },
+
+  progressSplitGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 10,
+    marginBottom: 10,
+  },
+
+  progressMetricCard: {
+    border: "2px solid #d7e6f8",
+    borderRadius: 18,
+    padding: "10px 10px 9px",
+    background: "#ffffff",
+    minWidth: 0,
+  },
+
+  meaningProgressCard: {
+    background: "#fff9df",
+  },
+
+  readingProgressCard: {
+    background: "#edf7ff",
+  },
+
+  progressMetricTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    gap: 8,
+  },
+
+  progressMetricLabel: {
+    fontSize: 17,
+    fontWeight: 900,
+    color: "#172033",
+  },
+
+  progressMetricSub: {
+    fontSize: 11,
+    fontWeight: 900,
+    color: "#6d7c90",
+  },
+
+  progressMetricNumber: {
+    margin: "4px 0 5px",
+    fontSize: "clamp(24px, 5vw, 34px)",
+    fontWeight: 900,
+    lineHeight: 1,
+    color: "#172033",
+  },
+
   progressNumber: {
     margin: "2px 0 0",
     fontSize: "clamp(32px, 6vw, 46px)",
@@ -745,6 +868,14 @@ const styles: Record<string, React.CSSProperties> = {
   progressBarFill: {
     height: "100%",
     borderRadius: 999,
+    background: "#7fb8e8",
+  },
+
+  meaningProgressFill: {
+    background: "#f0c64f",
+  },
+
+  readingProgressFill: {
     background: "#7fb8e8",
   },
 

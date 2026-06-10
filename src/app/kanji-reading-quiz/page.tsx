@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { judgeReadingAnswer } from "@/lib/readingAnswerJudge";
 
 type HintKanjiItem = {
   kanji: string;
@@ -88,16 +89,6 @@ const ASSETS = {
   correct: "/reading-quiz/correct.png",
   wrong: "/reading-quiz/wrong.png",
 };
-
-function normalizeKanaInput(value: string) {
-  return value
-    .normalize("NFKC")
-    .replace(/\s+/g, "")
-    .replace(/[ァ-ヶ]/g, (char) =>
-      String.fromCharCode(char.charCodeAt(0) - 0x60)
-    )
-    .toLowerCase();
-}
 
 function playTone(type: "correct" | "wrong") {
   try {
@@ -453,13 +444,61 @@ function KanjiReadingQuizInner() {
     });
   }
 
-  function isAnswerCorrect(question: ReadingQuestion, rawInput: string) {
-    const normalizedInput = normalizeKanaInput(rawInput);
-    const accepted = [question.answer_text, ...(question.answer_aliases ?? [])]
-      .map((item) => normalizeKanaInput(item))
-      .filter(Boolean);
+  useEffect(() => {
+    function handleGlobalEnter(event: KeyboardEvent) {
+      if (event.key !== "Enter") return;
+      if (event.repeat) return;
+      if (event.defaultPrevented) return;
+      if (event.isComposing) return;
+      if ((event as any).keyCode === 229) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (loading || saving || showComplete || showUnitStartScreen) return;
+      if (!currentQuestion) return;
+      if (menuOpen) return;
 
-    return accepted.includes(normalizedInput);
+      const target = event.target;
+
+      if (target instanceof HTMLElement) {
+        if (target.closest("textarea, select, button, a")) {
+          return;
+        }
+
+        if (!checked && target.closest("input")) {
+          return;
+        }
+      }
+
+      const value = getCurrentInputValue();
+
+      if (!checked && !value.trim()) return;
+
+      event.preventDefault();
+      handleCheckOrNext();
+    }
+
+    window.addEventListener("keydown", handleGlobalEnter);
+
+    return () => {
+      window.removeEventListener("keydown", handleGlobalEnter);
+    };
+  }, [
+    checked,
+    currentQuestion,
+    getCurrentInputValue,
+    handleCheckOrNext,
+    loading,
+    menuOpen,
+    saving,
+    showComplete,
+    showUnitStartScreen,
+  ]);
+
+  function isAnswerCorrect(question: ReadingQuestion, rawInput: string) {
+    return judgeReadingAnswer({
+      userAnswer: rawInput,
+      answerText: question.answer_text,
+      answerAliases: question.answer_aliases,
+    });
   }
 
   function renderAnnotatedSegment(
@@ -1490,6 +1529,13 @@ function KanjiReadingQuizInner() {
                         onChange={(e) => setCurrentInputValue(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
+                            if (
+                              e.nativeEvent.isComposing ||
+                              (e.nativeEvent as any).keyCode === 229
+                            ) {
+                              return;
+                            }
+
                             e.preventDefault();
                             handleCheckOrNext();
                           }
@@ -1813,6 +1859,13 @@ function KanjiReadingQuizInner() {
                   onChange={(e) => setCurrentInputValue(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
+                      if (
+                        e.nativeEvent.isComposing ||
+                        (e.nativeEvent as any).keyCode === 229
+                      ) {
+                        return;
+                      }
+
                       e.preventDefault();
                       handleCheckOrNext();
                     }
@@ -2304,8 +2357,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   targetUnderline: {
     position: "absolute",
-    left: "8%",
-    right: "8%",
+    left: "2%",
+    right: "2%",
     bottom: -2,
     height: 10,
     background: "#38a0d8",
