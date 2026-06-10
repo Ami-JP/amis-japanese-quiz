@@ -512,7 +512,7 @@ function KanjiReadingQuizInner() {
         .map((item) => [item.text, item.ruby])
     );
 
-    if (!showFurigana || rubyMap.size === 0) {
+    if (!shouldShowFurigana || rubyMap.size === 0) {
       return <span>{text}</span>;
     }
 
@@ -570,7 +570,16 @@ function KanjiReadingQuizInner() {
     return (
       <>
         {renderAnnotatedSegment(before, question.prompt_ruby_items, "before")}
-        <span style={styles.targetWrap}>
+        <span
+          style={
+            checked
+              ? { ...styles.targetWrap, ...styles.targetWrapChecked }
+              : styles.targetWrap
+          }
+        >
+          {checked && question.target_ruby ? (
+            <span style={styles.targetRubyText}>{question.target_ruby}</span>
+          ) : null}
           <span>{target}</span>
           <span style={styles.targetUnderline} />
         </span>
@@ -950,6 +959,10 @@ function KanjiReadingQuizInner() {
   const hasMoreReadings = batch?.hasMoreReadingVariants === true;
   const isFinalUnitComplete = currentMode !== "review" && unitComplete;
 
+  const shouldShowFurigana = showFurigana || checked;
+  const shouldShowEnglish = showEnglish || checked;
+  const shouldShowHint = showHint || checked;
+
   if (loading) {
     return (
       <main style={styles.page}>
@@ -1172,7 +1185,7 @@ function KanjiReadingQuizInner() {
     (isDesktop ? 18 : isTablet ? 14 : isSmallPhone ? 10 : 12);
 
   const promptLineHeight = shouldWrapPrompt
-    ? showFurigana
+    ? shouldShowFurigana
       ? isDesktop
         ? 1.34
         : 1.36
@@ -1481,7 +1494,7 @@ function KanjiReadingQuizInner() {
                     </div>
 
                     <div style={styles.translationRowDesktop}>
-                      {showEnglish ? (
+                      {shouldShowEnglish ? (
                         <div style={styles.translationText}>
                           {currentQuestion.translation_en}
                         </div>
@@ -1508,7 +1521,7 @@ function KanjiReadingQuizInner() {
                 <div
                   style={{
                     ...styles.desktopBottom,
-                    gridTemplateColumns: showHint
+                    gridTemplateColumns: shouldShowHint
                       ? "minmax(0, 1fr) minmax(410px, 0.94fr)"
                       : "minmax(0, 1fr) 304px",
                   }}
@@ -1608,7 +1621,7 @@ function KanjiReadingQuizInner() {
                   </div>
 
                   <div style={styles.hintBlockDesktop}>
-                    {!showHint ? (
+                    {!shouldShowHint ? (
                       <div style={styles.hintButtonWrap}>
                         <button
                           type="button"
@@ -1712,7 +1725,7 @@ function KanjiReadingQuizInner() {
               </div>
 
               <div style={styles.translationRowMobile}>
-                {showEnglish ? (
+                {shouldShowEnglish ? (
                   <div
                     style={{
                       ...styles.translationText,
@@ -1775,7 +1788,7 @@ function KanjiReadingQuizInner() {
                   marginTop: isTablet ? 2 : 0,
                 }}
               >
-                {!showHint ? (
+                {!shouldShowHint ? (
                   <div style={styles.mobileHintBlock}>
                     <button
                       type="button"
@@ -2355,14 +2368,39 @@ const styles: Record<string, React.CSSProperties> = {
     paddingBottom: 10,
     margin: "0 2px",
   },
+  targetWrapChecked: {
+    paddingTop: "0.34em",
+  },
+  targetRubyText: {
+    position: "absolute",
+    left: "50%",
+    top: "-0.06em",
+    transform: "translateX(-50%)",
+    fontSize: "0.26em",
+    fontWeight: 900,
+    color: "#d11f1f",
+    lineHeight: 1,
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+  },
+  targetTextChecked: {
+    color: "#d11f1f",
+    fontWeight: 900,
+  },
   targetUnderline: {
     position: "absolute",
-    left: "2%",
-    right: "2%",
+    left: "8%",
+    right: "8%",
     bottom: -2,
     height: 10,
     background: "#38a0d8",
     borderRadius: 999,
+  },
+  targetUnderlineChecked: {
+    background: "#d11f1f",
+    height: 12,
+    left: "2%",
+    right: "2%",
   },
   translationText: {
     textAlign: "center",
