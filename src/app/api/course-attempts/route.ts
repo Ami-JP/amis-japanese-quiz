@@ -611,15 +611,7 @@ function getCorrectAnswer(params: {
   question: CourseQuestionRow;
   kanjiHint: KanjiHintRow | null;
 }) {
-  const { question, kanjiHint } = params;
-
-  if (isMeaningQuestion(question)) {
-    const hintMeaning = kanjiHint?.meaning_en?.trim();
-
-    if (hintMeaning) {
-      return hintMeaning;
-    }
-  }
+  const { question } = params;
 
   return question.answer_text;
 }

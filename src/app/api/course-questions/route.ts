@@ -81,17 +81,6 @@ function getSupabaseAdmin() {
   });
 }
 
-function shuffleArray<T>(array: T[]) {
-  const copied = [...array];
-
-  for (let index = copied.length - 1; index > 0; index -= 1) {
-    const randomIndex = Math.floor(Math.random() * (index + 1));
-    [copied[index], copied[randomIndex]] = [copied[randomIndex], copied[index]];
-  }
-
-  return copied;
-}
-
 function toArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   return [];
@@ -99,66 +88,6 @@ function toArray(value: unknown): unknown[] {
 
 function isMeaningQuestion(question: CourseQuestionRow) {
   return question.section === "kanji_meaning" || question.quiz_type === "kanji_meaning";
-}
-
-function normalizeChoice(value: string) {
-  return value
-    .normalize("NFKC")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[。、，,.!！?？]/g, "");
-}
-
-function getCorrectMeaningFromHint(params: {
-  question: CourseQuestionRow;
-  hint: KanjiHintRow | null;
-}) {
-  const { question, hint } = params;
-
-  const hintMeaning = hint?.meaning_en?.trim();
-
-  if (hintMeaning) {
-    return hintMeaning;
-  }
-
-  return question.answer_text;
-}
-
-function buildMeaningChoices(params: {
-  question: CourseQuestionRow;
-  hint: KanjiHintRow | null;
-}) {
-  const { question, hint } = params;
-
-  const correctAnswer = getCorrectMeaningFromHint({ question, hint });
-  const oldAnswer = question.answer_text;
-
-  const rawChoices = toArray(question.choices_json).filter(
-    (choice): choice is string => typeof choice === "string"
-  );
-
-  const distractors = rawChoices.filter((choice) => {
-    const normalizedChoice = normalizeChoice(choice);
-    return (
-      normalizedChoice !== normalizeChoice(correctAnswer) &&
-      normalizedChoice !== normalizeChoice(oldAnswer)
-    );
-  });
-
-  const uniqueChoices: string[] = [];
-
-  for (const choice of [correctAnswer, ...distractors]) {
-    const alreadyExists = uniqueChoices.some(
-      (existing) => normalizeChoice(existing) === normalizeChoice(choice)
-    );
-
-    if (!alreadyExists) {
-      uniqueChoices.push(choice);
-    }
-  }
-
-  return shuffleArray(uniqueChoices.slice(0, 4));
 }
 
 export async function GET(request: NextRequest) {
@@ -404,14 +333,12 @@ export async function GET(request: NextRequest) {
         : null;
 
       if (isMeaningQuestion(question)) {
-        const correctAnswer = getCorrectMeaningFromHint({ question, hint });
-
         return {
           ...question,
-          answer_text: correctAnswer,
-          meaning_en: hint?.meaning_en ?? question.meaning_en,
-          meaning_ja: hint?.meaning_ja ?? question.meaning_ja,
-          choices_json: buildMeaningChoices({ question, hint }),
+          answer_text: question.answer_text,
+          meaning_en: question.meaning_en,
+          meaning_ja: question.meaning_ja,
+          choices_json: toArray(question.choices_json),
           ruby_annotations: toArray(question.ruby_annotations),
           kanji_hint: hint,
         };
