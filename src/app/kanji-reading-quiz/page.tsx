@@ -40,6 +40,27 @@ type ReadingQuestion = {
   difficulty_tier: string;
 };
 
+type SetOverviewStatus = "done" | "review" | "not_started" | "soon";
+
+type SetOverviewItem = {
+  setNumber: number;
+  startOrder: number;
+  endOrder: number;
+  status: SetOverviewStatus;
+  isToday: boolean;
+  reviewCount: number;
+};
+
+type SetOverview = {
+  setSize: number;
+  totalQuestionCount: number;
+  totalSetCount: number;
+  completedSetCount: number;
+  todaySetNumber: number | null;
+  reviewCount: number;
+  sets: SetOverviewItem[];
+};
+
 type BatchResponse = {
   account: {
     display_name: string | null;
@@ -47,7 +68,7 @@ type BatchResponse = {
   };
   unit: string;
   difficulty_tier: string;
-  mode: "normal" | "practice-set" | "review-wrong";
+  mode: "normal" | "practice-set" | "review-wrong" | "practice";
   startOrder?: number | null;
   endOrder?: number | null;
   lastOrderCompleted: number;
@@ -56,6 +77,7 @@ type BatchResponse = {
   isUnitComplete?: boolean;
   hasAdvancedAvailable?: boolean;
   hasMoreReadingVariants?: boolean;
+  setOverview?: SetOverview;
   questions: ReadingQuestion[];
   error?: string;
 };
@@ -211,6 +233,49 @@ function splitReadingsToLines(value: string) {
     .filter(Boolean);
 }
 
+function getUnitDisplayLabel(unit: string) {
+  const match = unit.match(/^grade(\d+)-kanji-(\d+)$/);
+
+  if (!match) return unit;
+
+  return `Level ${match[1]} / Unit ${match[2]}`;
+}
+
+function getUnitListHref(unit: string) {
+  const match = unit.match(/^grade(\d+)-kanji-/);
+  const level = match?.[1];
+
+  if (!level) return "/student-home";
+
+  return `/student-home/level/${level}?quiz=reading`;
+}
+
+function getSetStatusText(item: SetOverviewItem) {
+  if (item.status === "review") return "Review";
+  if (item.status === "done") return "Done";
+  if (item.status === "soon") return "Soon";
+  return "Not started";
+}
+
+function getReviewMessage(reviewCount: number) {
+  if (reviewCount > 0) {
+    return {
+      title: `Reviewあり：${reviewCount}件`,
+      text: "もう一度練習できます",
+    };
+  }
+
+  return {
+    title: "Review：0件",
+    text: "Perfect! 復習はありません",
+  };
+}
+
+function getAccuracyPercent(correctCount: number, answeredCount: number) {
+  if (answeredCount <= 0) return 0;
+  return Math.round((correctCount / answeredCount) * 100);
+}
+
 function KanjiReadingQuizInner() {
   const searchParams = useSearchParams();
   const unit = (searchParams.get("unit") ?? "").trim();
@@ -320,6 +385,7 @@ function KanjiReadingQuizInner() {
 
     const res = await fetch(`/api/kanji-reading-quiz?${params.toString()}`, {
       credentials: "include",
+      cache: "no-store",
     });
 
     if (res.status === 401) {
@@ -358,6 +424,7 @@ function KanjiReadingQuizInner() {
 
         const res = await fetch(`/api/kanji-reading-quiz?${params.toString()}`, {
           credentials: "include",
+          cache: "no-store",
         });
 
         if (res.status === 401) {
@@ -378,14 +445,7 @@ function KanjiReadingQuizInner() {
         setStartScreenProgress(data.lastOrderCompleted ?? 0);
         setStartScreenHasAdvanced(data.hasAdvancedAvailable === true);
 
-        if (
-          difficultyTier === "high_level" &&
-          (data.lastOrderCompleted ?? 0) === 0
-        ) {
-          setShowUnitStartScreen(false);
-        } else {
-          setShowUnitStartScreen(true);
-        }
+        setShowUnitStartScreen(true);
 
         setLoading(false);
         return;
@@ -735,19 +795,20 @@ function KanjiReadingQuizInner() {
   }
 
   async function startWrongReview() {
-    if (!batch) return;
+    if (!unit) return;
 
     setMenuOpen(false);
     setSaving(false);
     setError("");
 
     const params = new URLSearchParams();
-    params.set("unit", batch.unit);
-    params.set("tier", batch.difficulty_tier);
+    params.set("unit", batch?.unit ?? unit);
+    params.set("tier", batch?.difficulty_tier ?? difficultyTier);
     params.set("mode", "review-wrong");
 
     const res = await fetch(`/api/kanji-reading-quiz?${params.toString()}`, {
       credentials: "include",
+      cache: "no-store",
     });
 
     if (res.status === 401) {
@@ -767,6 +828,7 @@ function KanjiReadingQuizInner() {
       return;
     }
 
+    setBatch(data);
     setCurrentMode("review");
     setReviewQuestions(data.questions);
     setQuestionIndex(0);
@@ -779,6 +841,7 @@ function KanjiReadingQuizInner() {
     setShowFurigana(false);
     setShowEnglish(false);
     setShowHint(false);
+    setShowUnitStartScreen(false);
     setMenuOpen(false);
 
     setTimeout(() => {
@@ -842,16 +905,93 @@ function KanjiReadingQuizInner() {
     }, 80);
   }
 
-  async function handleContinueFromStartScreen() {
-    if (batch) {
-      setShowUnitStartScreen(false);
+  async function loadStartScreenBatch(options?: { startFromBeginning?: boolean }) {
+    if (!unit) return;
+
+    setLoading(true);
+    setError("");
+    setShowComplete(false);
+    setUnitComplete(false);
+    setReviewQuestions(null);
+    setQuestionIndex(0);
+    setAnswers([]);
+    setAttempts([]);
+    setChecked(false);
+    setWasCorrect(null);
+    setShowFurigana(false);
+    setShowEnglish(false);
+    setShowHint(false);
+    setMenuOpen(false);
+
+    const params = new URLSearchParams();
+    params.set("unit", unit);
+    params.set("tier", difficultyTier);
+    params.set("mode", "normal");
+
+    if (options?.startFromBeginning) {
+      params.set("startFromBeginning", "1");
+    }
+
+    const res = await fetch(`/api/kanji-reading-quiz?${params.toString()}`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+
+    if (res.status === 401) {
+      window.location.href = "/student-login";
       return;
     }
+
+    const data = (await res.json()) as BatchResponse;
+
+    if (!res.ok) {
+      setError(data.error ?? "Failed to load quiz.");
+      setBatch(null);
+      setLoading(false);
+      return;
+    }
+
+    setBatch(data);
+    setStartScreenProgress(data.lastOrderCompleted ?? 0);
+    setStartScreenHasAdvanced(data.hasAdvancedAvailable === true);
+    setCurrentMode("normal");
+    setShowUnitStartScreen(true);
+    setLoading(false);
+  }
+
+  async function handleContinueFromStartScreen() {
+    if (batch?.questions?.length) {
+      setCurrentMode("normal");
+      setReviewQuestions(null);
+      setShowUnitStartScreen(false);
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 80);
+      return;
+    }
+
     await loadBatch("normal");
   }
 
   async function handleStartFromBeginningFromStartScreen() {
-    await loadBatch("normal", { startFromBeginning: true });
+    await loadStartScreenBatch({ startFromBeginning: true });
+  }
+
+  async function handleBackToUnitMap() {
+    await loadStartScreenBatch();
+  }
+
+  function handleBackToUnitList() {
+    window.location.href = getUnitListHref(unit);
+  }
+
+  async function handlePracticeSetFromMap(item: SetOverviewItem) {
+    if (item.status === "soon") return;
+
+    await loadBatch("practice-set", {
+      startOrder: item.startOrder,
+      endOrder: item.endOrder,
+    });
   }
 
   async function handleContinueMenu() {
@@ -868,6 +1008,78 @@ function KanjiReadingQuizInner() {
     window.location.href = `/kanji-reading-quiz?unit=${encodeURIComponent(
       unit
     )}&tier=high_level&mode=normal`;
+  }
+
+  function renderSetLegend() {
+    const items = [
+      { label: "Done", style: styles.legendDoneDot },
+      { label: "Review", style: styles.legendReviewDot },
+      { label: "Not started", style: styles.legendNotStartedDot },
+      { label: "Soon", style: styles.legendSoonDot },
+    ];
+
+    return (
+      <div style={styles.setLegend} aria-label="Set color legend">
+        {items.map((item) => (
+          <div key={item.label} style={styles.legendItem}>
+            <span style={{ ...styles.legendDot, ...item.style }} />
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderSetMap(overview: SetOverview) {
+    if (overview.totalSetCount <= 0) {
+      return (
+        <div style={styles.setMapEmpty}>
+          This unit does not have reading sets yet.
+        </div>
+      );
+    }
+
+    return (
+      <div style={styles.setMapGrid}>
+        {overview.sets.map((item) => {
+          const setStyle =
+            item.status === "review"
+              ? styles.setNodeReview
+              : item.status === "done"
+              ? styles.setNodeDone
+              : item.status === "soon"
+              ? styles.setNodeSoon
+              : styles.setNodeNotStarted;
+
+          const disabled = item.status === "soon";
+
+          return (
+            <div key={item.setNumber} style={styles.setNodeWrap}>
+              {item.isToday ? <div style={styles.todayFlag}>今日はここ</div> : null}
+              <button
+                type="button"
+                onClick={() => void handlePracticeSetFromMap(item)}
+                disabled={disabled}
+                style={{
+                  ...styles.setNode,
+                  ...setStyle,
+                  cursor: disabled ? "not-allowed" : "pointer",
+                  opacity: disabled ? 0.55 : 1,
+                }}
+                title={
+                  disabled
+                    ? "This set is not available yet."
+                    : `Practice Set ${item.setNumber}`
+                }
+              >
+                <span style={styles.setNodeNumber}>Set {item.setNumber}</span>
+                <span style={styles.setNodeStatus}>{getSetStatusText(item)}</span>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   function renderReadingLines(value: string, side: "left" | "right") {
@@ -963,6 +1175,58 @@ function KanjiReadingQuizInner() {
   const shouldShowEnglish = showEnglish || checked;
   const shouldShowHint = showHint || checked;
 
+  useEffect(() => {
+    function handleStartOrCompleteEnter(event: KeyboardEvent) {
+      if (event.key !== "Enter") return;
+      if (event.repeat) return;
+      if (event.defaultPrevented) return;
+      if (event.isComposing) return;
+      if ((event as any).keyCode === 229) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (loading || saving || menuOpen) return;
+      if (!showUnitStartScreen && !showComplete) return;
+
+      const target = event.target;
+
+      if (target instanceof HTMLElement) {
+        if (target.closest("textarea, input, select, button, a")) {
+          return;
+        }
+      }
+
+      event.preventDefault();
+
+      if (showUnitStartScreen) {
+        void handleContinueFromStartScreen();
+        return;
+      }
+
+      if (showComplete) {
+        if (currentMode === "review" || isFinalUnitComplete) {
+          void handleBackToUnitMap();
+          return;
+        }
+
+        void handleStudyNextFiveKanji();
+      }
+    }
+
+    window.addEventListener("keydown", handleStartOrCompleteEnter);
+
+    return () => {
+      window.removeEventListener("keydown", handleStartOrCompleteEnter);
+    };
+  }, [
+    currentMode,
+    isFinalUnitComplete,
+    loading,
+    menuOpen,
+    saving,
+    showComplete,
+    showUnitStartScreen,
+  ]);
+
+
   if (loading) {
     return (
       <main style={styles.page}>
@@ -975,15 +1239,95 @@ function KanjiReadingQuizInner() {
 
   if (showUnitStartScreen && unit) {
     const isFirstTime = startScreenProgress === 0 && difficultyTier === "normal";
+    const overview = batch?.setOverview ?? null;
+    const reviewCount = overview?.reviewCount ?? 0;
+    const reviewMessage = getReviewMessage(reviewCount);
+    const remainingSetCount = overview
+      ? Math.max(0, overview.totalSetCount - overview.completedSetCount)
+      : 0;
+    const isOverviewUnitComplete =
+      !!overview &&
+      overview.totalSetCount > 0 &&
+      overview.completedSetCount >= overview.totalSetCount;
+    const todayBoxLabel = isOverviewUnitComplete ? "完了 / Done" : "今日はここ";
+    const todaySetLabel = overview?.todaySetNumber
+      ? `Set ${overview.todaySetNumber}`
+      : overview && overview.totalSetCount > 0
+      ? "Unit complete!"
+      : "Ready";
+    const canContinue =
+      (batch?.questions?.length ?? 0) > 0 && !isOverviewUnitComplete;
 
     return (
       <main style={styles.page}>
         <div style={styles.centerWrap}>
-          <div style={styles.messageCard}>
-            <h2 style={styles.messageTitle}>Ready to study?</h2>
-            <p style={styles.messageText}>
-              Unit: <strong>{unit}</strong>
+          <div style={{ ...styles.messageCard, ...styles.unitMapCard }}>
+            <div style={styles.unitMapTopRow}>
+              <button
+                type="button"
+                onClick={handleBackToUnitList}
+                style={styles.smallBackButton}
+              >
+                ← Back to Units
+              </button>
+            </div>
+
+            <p style={styles.unitMapKicker}>
+              {difficultyTier === "high_level" ? "Advanced Reading Quiz" : "Reading Quiz"}
             </p>
+            <h2 style={styles.messageTitle}>{getUnitDisplayLabel(unit)}</h2>
+
+            <div style={styles.todayBox}>
+              <span style={styles.todayLabel}>{todayBoxLabel}</span>
+              <strong style={styles.todaySetText}>{todaySetLabel}</strong>
+            </div>
+
+            {overview ? (
+              <>
+                <p style={styles.unitMapProgressText}>
+                  {overview.completedSetCount} / {overview.totalSetCount} sets completed
+                </p>
+                <p style={styles.unitMapSmallText}>
+                  {remainingSetCount > 0
+                    ? `あと${remainingSetCount}セット！`
+                    : "Congratulations! Unit complete!"}
+                </p>
+
+                <section
+                  style={{
+                    ...styles.reviewSummaryBox,
+                    ...(reviewCount > 0
+                      ? styles.reviewSummaryBoxActive
+                      : styles.reviewSummaryBoxPerfect),
+                  }}
+                >
+                  <div>
+                    <p style={styles.reviewSummaryTitle}>{reviewMessage.title}</p>
+                    <p style={styles.reviewSummaryText}>{reviewMessage.text}</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={startWrongReview}
+                    disabled={reviewCount <= 0}
+                    style={{
+                      ...styles.reviewUnitButton,
+                      opacity: reviewCount > 0 ? 1 : 0.55,
+                      cursor: reviewCount > 0 ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    Review this unit
+                  </button>
+                </section>
+
+                {renderSetLegend()}
+                {renderSetMap(overview)}
+              </>
+            ) : (
+              <p style={styles.messageText}>
+                Unit: <strong>{unit}</strong>
+              </p>
+            )}
 
             <div style={styles.completeButtons}>
               {isFirstTime ? (
@@ -991,13 +1335,16 @@ function KanjiReadingQuizInner() {
                   <button
                     type="button"
                     onClick={handleContinueFromStartScreen}
+                    disabled={!canContinue}
                     style={{
                       ...styles.primaryButton,
                       fontSize: 18,
                       padding: "14px 28px",
+                      opacity: canContinue ? 1 : 0.55,
+                      cursor: canContinue ? "pointer" : "not-allowed",
                     }}
                   >
-                    Normal Mode
+                    Start today's set
                   </button>
 
                   {startScreenHasAdvanced ? (
@@ -1020,17 +1367,30 @@ function KanjiReadingQuizInner() {
                   <button
                     type="button"
                     onClick={handleContinueFromStartScreen}
-                    style={styles.primaryButton}
+                    disabled={!canContinue}
+                    style={{
+                      ...styles.primaryButton,
+                      opacity: canContinue ? 1 : 0.55,
+                      cursor: canContinue ? "pointer" : "not-allowed",
+                    }}
                   >
                     Continue
                   </button>
 
                   <button
                     type="button"
-                    onClick={handleStartFromBeginningFromStartScreen}
+                    onClick={handleBackToUnitList}
                     style={styles.secondaryButton}
                   >
-                    Start from beginning
+                    Back to Units
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={goHome}
+                    style={styles.secondaryButton}
+                  >
+                    Back to Home
                   </button>
 
                   {difficultyTier === "normal" && startScreenHasAdvanced ? (
@@ -1050,6 +1410,11 @@ function KanjiReadingQuizInner() {
                 </>
               )}
             </div>
+
+            <p style={styles.enterHintText}>Press Enter to continue.</p>
+            <p style={styles.practiceSetNote}>
+              Set buttons are for practice. Use Continue for your next normal set.
+            </p>
           </div>
         </div>
       </main>
@@ -1070,31 +1435,62 @@ function KanjiReadingQuizInner() {
   }
 
   if (showComplete) {
+    const answeredCount = activeQuestions.length || batch?.questions.length || 0;
+    const accuracyPercent = getAccuracyPercent(correctCount, answeredCount);
+    const completeTitle =
+      currentMode === "review"
+        ? "Review complete!"
+        : isFinalUnitComplete
+        ? "Congratulations!"
+        : "Set complete!";
+    const completeSubText =
+      currentMode === "review"
+        ? "Nice review! Unit画面で色を確認しましょう。"
+        : isFinalUnitComplete
+        ? "Unit complete! よくがんばりました！"
+        : "Nice work! 次の5問に進めます。";
+
     return (
       <main style={styles.page}>
         <div style={styles.centerWrap}>
           <div style={styles.messageCard}>
-            <h2 style={styles.messageTitle}>
-              {currentMode === "review"
-                ? "Review complete!"
-                : isFinalUnitComplete
-                ? "Congratulations!"
-                : "Set complete!"}
-            </h2>
+            <h2 style={styles.messageTitle}>{completeTitle}</h2>
+            <p style={styles.completeSubText}>{completeSubText}</p>
 
-            <p style={styles.messageText}>
-              Correct: {correctCount} /{" "}
-              {activeQuestions.length || batch?.questions.length || 0}
-            </p>
-            <p style={styles.messageText}>Wrong: {wrongCount}</p>
+            <div style={styles.resultStatsGrid}>
+              <div style={styles.resultStatCard}>
+                <span style={styles.resultStatLabel}>Answered</span>
+                <strong style={styles.resultStatNumber}>{answeredCount}</strong>
+              </div>
+              <div style={styles.resultStatCard}>
+                <span style={styles.resultStatLabel}>Correct</span>
+                <strong style={styles.resultStatNumber}>{correctCount}</strong>
+              </div>
+              <div style={styles.resultStatCard}>
+                <span style={styles.resultStatLabel}>Review</span>
+                <strong style={styles.resultStatNumber}>{wrongCount}</strong>
+              </div>
+              <div style={styles.resultStatCard}>
+                <span style={styles.resultStatLabel}>Accuracy</span>
+                <strong style={styles.resultStatNumber}>{accuracyPercent}%</strong>
+              </div>
+            </div>
 
             <div style={styles.completeButtons}>
               {isFinalUnitComplete ? (
                 <>
                   <button
                     type="button"
-                    onClick={startWrongReview}
+                    onClick={handleBackToUnitMap}
                     style={styles.primaryButton}
+                  >
+                    Back to Unit Map
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={startWrongReview}
+                    style={styles.secondaryButton}
                   >
                     Review wrong answers
                   </button>
@@ -1106,25 +1502,35 @@ function KanjiReadingQuizInner() {
                   >
                     Back to Home
                   </button>
+                </>
+              ) : currentMode === "review" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleBackToUnitMap}
+                    style={styles.primaryButton}
+                  >
+                    Back to Unit Map
+                  </button>
 
                   <button
                     type="button"
-                    onClick={handleRestartUnit}
+                    onClick={startWrongReview}
                     style={styles.secondaryButton}
                   >
-                    Start from beginning
+                    Review more
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={goHome}
+                    style={styles.secondaryButton}
+                  >
+                    Back to Home
                   </button>
                 </>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    onClick={startWrongReview}
-                    style={styles.primaryButton}
-                  >
-                    Review wrong answers
-                  </button>
-
                   <button
                     type="button"
                     onClick={handleStudyNextFiveKanji}
@@ -1135,10 +1541,10 @@ function KanjiReadingQuizInner() {
 
                   <button
                     type="button"
-                    onClick={goHome}
+                    onClick={startWrongReview}
                     style={styles.secondaryButton}
                   >
-                    Back to Home
+                    Review wrong answers
                   </button>
 
                   <button
@@ -1148,9 +1554,31 @@ function KanjiReadingQuizInner() {
                   >
                     Practice this set again
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={handleBackToUnitMap}
+                    style={styles.secondaryButton}
+                  >
+                    Back to Unit Map
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={goHome}
+                    style={styles.secondaryButton}
+                  >
+                    Back to Home
+                  </button>
                 </>
               )}
             </div>
+
+            <p style={styles.enterHintText}>
+              {currentMode === "review" || isFinalUnitComplete
+                ? "Press Enter to go back to the Unit Map."
+                : "Press Enter to practice 5 more."}
+            </p>
           </div>
         </div>
       </main>
@@ -1169,6 +1597,16 @@ function KanjiReadingQuizInner() {
               You may have finished this unit, or the questions may still be in
               preparation. Please ask your teacher.
             </p>
+
+            <div style={{ marginTop: 22 }}>
+              <button
+                type="button"
+                onClick={goHome}
+                style={styles.secondaryButton}
+              >
+                Back to Home
+              </button>
+            </div>
           </div>
         </div>
       </main>
@@ -1308,14 +1746,6 @@ function KanjiReadingQuizInner() {
                   onClick={handleContinueMenu}
                 >
                   Continue
-                </button>
-
-                <button
-                  type="button"
-                  style={styles.menuItem}
-                  onClick={handleRestartUnit}
-                >
-                  Start from beginning
                 </button>
 
                 <button
@@ -1985,6 +2415,258 @@ export default function KanjiReadingQuizPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  unitMapCard: {
+    background: "rgba(255,255,255,0.94)",
+    width: "min(760px, 94vw)",
+  },
+  unitMapTopRow: {
+    display: "flex",
+    justifyContent: "flex-start",
+    marginBottom: 8,
+  },
+  smallBackButton: {
+    border: "3px solid #111",
+    borderRadius: 999,
+    background: "#fff",
+    color: "#111",
+    padding: "8px 14px",
+    fontSize: 14,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+  },
+  unitMapKicker: {
+    margin: "0 0 8px",
+    color: "#4d97d4",
+    fontSize: 15,
+    fontWeight: 900,
+    letterSpacing: 1,
+  },
+  todayBox: {
+    margin: "16px auto 12px",
+    border: "4px solid #111",
+    borderRadius: 24,
+    background: "#fff3c4",
+    padding: "12px 16px",
+    width: "min(420px, 100%)",
+    boxShadow: "0 6px 0 rgba(0,0,0,0.12)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    alignItems: "center",
+  },
+  todayLabel: {
+    background: "#111",
+    color: "#fff",
+    borderRadius: 999,
+    padding: "4px 12px",
+    fontSize: 13,
+    fontWeight: 900,
+  },
+  todaySetText: {
+    fontSize: 28,
+    fontWeight: 900,
+    lineHeight: 1.1,
+  },
+  unitMapProgressText: {
+    margin: "12px 0 2px",
+    fontSize: 18,
+    fontWeight: 900,
+  },
+  unitMapSmallText: {
+    margin: "0 0 12px",
+    fontSize: 15,
+    fontWeight: 900,
+    color: "#536174",
+  },
+  reviewSummaryBox: {
+    border: "3px solid #111",
+    borderRadius: 22,
+    padding: "12px 14px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    margin: "14px auto",
+    textAlign: "left",
+  },
+  reviewSummaryBoxActive: {
+    background: "#efe2ff",
+  },
+  reviewSummaryBoxPerfect: {
+    background: "#def8e8",
+  },
+  reviewSummaryTitle: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 900,
+  },
+  reviewSummaryText: {
+    margin: "4px 0 0",
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#536174",
+  },
+  reviewUnitButton: {
+    border: "3px solid #111",
+    borderRadius: 999,
+    background: "#8b5cf6",
+    color: "#fff",
+    padding: "10px 14px",
+    fontSize: 14,
+    fontWeight: 900,
+    flexShrink: 0,
+  },
+  setLegend: {
+    display: "flex",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    gap: "8px 12px",
+    margin: "8px 0 12px",
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#1f2b3d",
+  },
+  legendItem: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+  },
+  legendDot: {
+    display: "inline-block",
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+    border: "2px solid #111",
+  },
+  legendDoneDot: {
+    background: "#8ee6a8",
+  },
+  legendReviewDot: {
+    background: "#c5a3ff",
+  },
+  legendNotStartedDot: {
+    background: "#bfe0ff",
+  },
+  legendSoonDot: {
+    background: "#dcdcdc",
+  },
+  setMapGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))",
+    gap: "18px 12px",
+    margin: "18px 0 8px",
+  },
+  setNodeWrap: {
+    position: "relative",
+    minHeight: 92,
+    display: "flex",
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
+  todayFlag: {
+    position: "absolute",
+    top: -8,
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "#111",
+    color: "#fff",
+    borderRadius: 999,
+    padding: "4px 10px",
+    fontSize: 12,
+    fontWeight: 900,
+    zIndex: 2,
+    whiteSpace: "nowrap",
+  },
+  setNode: {
+    border: "4px solid #111",
+    borderRadius: 22,
+    minHeight: 72,
+    width: "100%",
+    padding: "14px 8px 10px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 4,
+    boxShadow: "0 6px 0 rgba(0,0,0,0.12)",
+  },
+  setNodeDone: {
+    background: "#8ee6a8",
+  },
+  setNodeReview: {
+    background: "#c5a3ff",
+  },
+  setNodeNotStarted: {
+    background: "#bfe0ff",
+  },
+  setNodeSoon: {
+    background: "#dcdcdc",
+  },
+  setNodeNumber: {
+    fontSize: 18,
+    fontWeight: 900,
+    lineHeight: 1,
+  },
+  setNodeStatus: {
+    fontSize: 12,
+    fontWeight: 900,
+    lineHeight: 1,
+  },
+  setMapEmpty: {
+    border: "3px dashed #111",
+    borderRadius: 20,
+    padding: 16,
+    fontSize: 15,
+    fontWeight: 900,
+    background: "#fff",
+    marginTop: 14,
+  },
+  enterHintText: {
+    margin: "14px 0 0",
+    fontSize: 13,
+    fontWeight: 900,
+    color: "#536174",
+  },
+  practiceSetNote: {
+    margin: "6px 0 0",
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#536174",
+  },
+  completeSubText: {
+    margin: "10px 0 0",
+    fontSize: 16,
+    fontWeight: 900,
+    color: "#536174",
+  },
+  resultStatsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: 10,
+    margin: "20px 0 4px",
+  },
+  resultStatCard: {
+    border: "3px solid #111",
+    borderRadius: 18,
+    background: "#fff",
+    padding: "10px 6px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+    boxShadow: "0 4px 0 rgba(0,0,0,0.10)",
+  },
+  resultStatLabel: {
+    fontSize: 11,
+    fontWeight: 900,
+    color: "#536174",
+  },
+  resultStatNumber: {
+    fontSize: 24,
+    fontWeight: 900,
+    lineHeight: 1,
+  },
   page: {
     minHeight: "100dvh",
     background:

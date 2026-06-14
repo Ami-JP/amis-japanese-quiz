@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getStudentSession } from "@/lib/auth/student";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const QUESTION_LIMIT = 5;
 const TABLE_NAME = "questions_master";
 
@@ -76,6 +79,27 @@ type ReadingHistoryRow = {
   wrong_count: number;
   last_shown_at: string | null;
   needs_review: boolean;
+};
+
+type SetOverviewStatus = "done" | "review" | "not_started" | "soon";
+
+type SetOverviewItem = {
+  setNumber: number;
+  startOrder: number;
+  endOrder: number;
+  status: SetOverviewStatus;
+  isToday: boolean;
+  reviewCount: number;
+};
+
+type SetOverview = {
+  setSize: number;
+  totalQuestionCount: number;
+  totalSetCount: number;
+  completedSetCount: number;
+  todaySetNumber: number | null;
+  reviewCount: number;
+  sets: SetOverviewItem[];
 };
 
 function getSupabase() {
@@ -179,7 +203,9 @@ function parseLooseJsonArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
-function parseRubyAnnotationStringItem(value: string): RubyAnnotationItem | null {
+function parseRubyAnnotationStringItem(
+  value: string,
+): RubyAnnotationItem | null {
   const normalized = value.trim();
   if (!normalized) return null;
 
@@ -261,7 +287,7 @@ async function getLoggedInAccount(db: any) {
       account: null,
       errorResponse: NextResponse.json(
         { error: "Unauthorized. Please log in again." },
-        { status: 401 }
+        { status: 401 },
       ),
     };
   }
@@ -277,7 +303,7 @@ async function getLoggedInAccount(db: any) {
       account: null,
       errorResponse: NextResponse.json(
         { error: error?.message ?? "Account not found." },
-        { status: 400 }
+        { status: 400 },
       ),
     };
   }
@@ -289,7 +315,7 @@ async function getLoggedInAccount(db: any) {
       account: null,
       errorResponse: NextResponse.json(
         { error: "This account is inactive." },
-        { status: 403 }
+        { status: 403 },
       ),
     };
   }
@@ -301,12 +327,12 @@ async function getReadingProgress(
   db: any,
   studentAccountId: string,
   unit: string,
-  difficultyTier: string
+  difficultyTier: string,
 ) {
   const { data, error } = await db
     .from("student_reading_progress")
     .select(
-      "student_account_id, unit, difficulty_tier, last_order_completed, last_studied_at, is_completed, completed_count"
+      "student_account_id, unit, difficulty_tier, last_order_completed, last_studied_at, is_completed, completed_count",
     )
     .eq("student_account_id", studentAccountId)
     .eq("unit", unit)
@@ -328,7 +354,7 @@ async function hasAdvancedReadingQuestions(db: any, unit: string) {
 async function fetchQuestionPool(
   db: any,
   unit: string,
-  difficultyTier: string
+  difficultyTier: string,
 ): Promise<ReadingQuestionRow[]> {
   const { data, error } = await db
     .from(TABLE_NAME)
@@ -359,7 +385,7 @@ async function fetchQuestionPool(
       explanation_ja,
       explanation_en,
       difficulty_tier
-    `
+    `,
     )
     .eq("unit", unit)
     .eq("is_published", true)
@@ -403,14 +429,14 @@ async function fetchQuestionPool(
 async function fetchReadingHistoryMap(
   db: any,
   studentAccountId: string,
-  questionIds: string[]
+  questionIds: string[],
 ): Promise<Record<string, ReadingHistoryRow>> {
   if (questionIds.length === 0) return {};
 
   const { data, error } = await db
     .from("student_reading_question_history")
     .select(
-      "question_id, shown_count, correct_count, wrong_count, last_shown_at, needs_review"
+      "question_id, shown_count, correct_count, wrong_count, last_shown_at, needs_review",
     )
     .eq("student_account_id", studentAccountId)
     .in("question_id", questionIds);
@@ -430,7 +456,7 @@ async function fetchReadingHistoryMap(
 async function fetchNeedsReviewQuestionIds(
   db: any,
   studentAccountId: string,
-  unit: string
+  unit: string,
 ) {
   const { data, error } = await db
     .from("student_reading_question_history")
@@ -452,7 +478,7 @@ async function fetchNeedsReviewQuestionIds(
 
 function chooseOneReadingPerKanji(
   pool: ReadingQuestionRow[],
-  historyMap: Record<string, ReadingHistoryRow>
+  historyMap: Record<string, ReadingHistoryRow>,
 ) {
   const groups = new Map<number, ReadingQuestionRow[]>();
 
@@ -512,7 +538,7 @@ function chooseOneReadingPerKanji(
 
 function hasMoreReadingVariants(
   pool: ReadingQuestionRow[],
-  selectedRows: ReadingQuestionRow[]
+  selectedRows: ReadingQuestionRow[],
 ) {
   const selectedIds = new Set(selectedRows.map((row) => questionIdKey(row.id)));
 
@@ -525,11 +551,14 @@ function hasMoreReadingVariants(
 
 async function fetchKanjiHintMap(
   db: any,
-  keys: string[]
+  keys: string[],
 ): Promise<Record<string, any>> {
   if (keys.length === 0) return {};
 
-  const { data, error } = await db.from("kanji_hints").select("*").in("kanji", keys);
+  const { data, error } = await db
+    .from("kanji_hints")
+    .select("*")
+    .in("kanji", keys);
 
   if (error) {
     throw new Error(error.message);
@@ -559,7 +588,12 @@ async function fetchKanjiHintMap(
         "kun_reading",
         "reading_kun",
       ]),
-      ruby: pickString(row, ["ruby", "reading_hiragana", "reading", "target_ruby"]),
+      ruby: pickString(row, [
+        "ruby",
+        "reading_hiragana",
+        "reading",
+        "target_ruby",
+      ]),
     };
 
     return acc;
@@ -568,7 +602,7 @@ async function fetchKanjiHintMap(
 
 function buildQuestionResponse(
   row: ReadingQuestionRow,
-  hintMap: Record<string, any>
+  hintMap: Record<string, any>,
 ) {
   const rubyAnnotationItems = parseRubyAnnotations(row.ruby_annotations);
   const hintKeys = parseLooseJsonArray(row.hint_kanji_keys);
@@ -635,8 +669,8 @@ async function buildHintMapForRows(db: any, rows: ReadingQuestionRow[]) {
         ...parseRubyAnnotations(row.ruby_annotations)
           .filter((item) => !item.ruby)
           .map((item) => item.text),
-      ])
-    )
+      ]),
+    ),
   );
 
   return fetchKanjiHintMap(db, allHintKeys);
@@ -645,7 +679,7 @@ async function buildHintMapForRows(db: any, rows: ReadingQuestionRow[]) {
 function filterPracticeSetPool(
   pool: ReadingQuestionRow[],
   startOrder: number | null,
-  endOrder: number | null
+  endOrder: number | null,
 ) {
   if (startOrder == null || endOrder == null) {
     return [];
@@ -658,12 +692,119 @@ function filterPracticeSetPool(
   });
 }
 
+function buildSetOverview(params: {
+  pool: ReadingQuestionRow[];
+  progress: ReadingProgress | null;
+  historyMap: Record<string, ReadingHistoryRow>;
+}): SetOverview {
+  const { pool, progress, historyMap } = params;
+  const lastOrderCompleted = progress?.last_order_completed ?? 0;
+  const unitHasBeenCompleted =
+    (progress?.completed_count ?? 0) >= 1 || progress?.is_completed === true;
+
+  const orderedRows = pool
+    .filter((row) => {
+      const order = normalizeNumber(row.order_in_unit);
+      return order != null && order > 0;
+    })
+    .sort(
+      (a, b) =>
+        (normalizeNumber(a.order_in_unit) ?? 0) -
+        (normalizeNumber(b.order_in_unit) ?? 0),
+    );
+
+  const totalQuestionCount = orderedRows.length;
+  const totalSetCount = Math.ceil(totalQuestionCount / QUESTION_LIMIT);
+  const sets: SetOverviewItem[] = [];
+
+  let reviewCount = 0;
+  let completedSetCount = 0;
+
+  for (let index = 0; index < totalSetCount; index += 1) {
+    const chunk = orderedRows.slice(
+      index * QUESTION_LIMIT,
+      index * QUESTION_LIMIT + QUESTION_LIMIT,
+    );
+
+    const firstRow = chunk[0];
+    const lastRow = chunk[chunk.length - 1];
+
+    const startOrder =
+      normalizeNumber(firstRow?.order_in_unit) ?? index * QUESTION_LIMIT + 1;
+    const endOrder =
+      normalizeNumber(lastRow?.order_in_unit) ??
+      Math.min((index + 1) * QUESTION_LIMIT, totalQuestionCount);
+
+    const setReviewCount = chunk.filter((row) => {
+      const history = historyMap[questionIdKey(row.id)];
+      return history?.needs_review === true && (history?.wrong_count ?? 0) > 0;
+    }).length;
+
+    reviewCount += setReviewCount;
+
+    const setIsCompleted = unitHasBeenCompleted || endOrder <= lastOrderCompleted;
+    if (setIsCompleted) {
+      completedSetCount += 1;
+    }
+
+    const status: SetOverviewStatus =
+      setReviewCount > 0 ? "review" : setIsCompleted ? "done" : "not_started";
+
+    sets.push({
+      setNumber: index + 1,
+      startOrder,
+      endOrder,
+      status,
+      isToday: false,
+      reviewCount: setReviewCount,
+    });
+  }
+
+  const todaySet = unitHasBeenCompleted
+    ? null
+    : sets.find((item) => item.endOrder > lastOrderCompleted) ?? null;
+
+  return {
+    setSize: QUESTION_LIMIT,
+    totalQuestionCount,
+    totalSetCount,
+    completedSetCount,
+    todaySetNumber: todaySet?.setNumber ?? null,
+    reviewCount,
+    sets: sets.map((item) => ({
+      ...item,
+      isToday: todaySet?.setNumber === item.setNumber,
+    })),
+  };
+}
+
+async function buildSetOverviewForUnit(params: {
+  db: any;
+  studentAccountId: string;
+  pool: ReadingQuestionRow[];
+  progress: ReadingProgress | null;
+}): Promise<SetOverview> {
+  const { db, studentAccountId, pool, progress } = params;
+  const questionIds = pool.map((row) => questionIdKey(row.id)).filter(Boolean);
+  const historyMap = await fetchReadingHistoryMap(
+    db,
+    studentAccountId,
+    questionIds,
+  );
+
+  return buildSetOverview({
+    pool,
+    progress,
+    historyMap,
+  });
+}
+
 async function updateReadingQuestionHistory(
   db: any,
   studentAccountId: string,
   unit: string,
   attempts: AttemptRow[],
-  _mode: string
+  _mode: string,
 ) {
   if (attempts.length === 0) return;
 
@@ -676,7 +817,7 @@ async function updateReadingQuestionHistory(
     const { data: existing, error: fetchError } = await db
       .from("student_reading_question_history")
       .select(
-        "id, shown_count, correct_count, wrong_count, kanji_order_in_unit, reading_variant_order, needs_review"
+        "id, shown_count, correct_count, wrong_count, kanji_order_in_unit, reading_variant_order, needs_review",
       )
       .eq("student_account_id", studentAccountId)
       .eq("question_id", questionId)
@@ -737,11 +878,16 @@ export async function GET(request: NextRequest) {
 
     const unit = normalizeText(request.nextUrl.searchParams.get("unit"));
     const difficultyTier = normalizeDifficultyTier(
-      request.nextUrl.searchParams.get("tier")
+      request.nextUrl.searchParams.get("tier"),
     );
-    const mode = normalizeText(request.nextUrl.searchParams.get("mode")) || "normal";
-    const startOrder = normalizeNumber(request.nextUrl.searchParams.get("startOrder"));
-    const endOrder = normalizeNumber(request.nextUrl.searchParams.get("endOrder"));
+    const mode =
+      normalizeText(request.nextUrl.searchParams.get("mode")) || "normal";
+    const startOrder = normalizeNumber(
+      request.nextUrl.searchParams.get("startOrder"),
+    );
+    const endOrder = normalizeNumber(
+      request.nextUrl.searchParams.get("endOrder"),
+    );
     const startFromBeginning =
       request.nextUrl.searchParams.get("startFromBeginning") === "1";
 
@@ -754,11 +900,18 @@ export async function GET(request: NextRequest) {
       hasAdvancedReadingQuestions(db, unit),
     ]);
 
+    let overviewProgress = await getReadingProgress(
+      db,
+      account.id,
+      unit,
+      difficultyTier,
+    );
+
     if (mode === "review-wrong") {
       const reviewQuestionIds = await fetchNeedsReviewQuestionIds(
         db,
         account.id,
-        unit
+        unit,
       );
 
       const reviewIdSet = new Set(reviewQuestionIds);
@@ -773,7 +926,9 @@ export async function GET(request: NextRequest) {
         .slice(0, QUESTION_LIMIT);
 
       const hintMap = await buildHintMapForRows(db, selectedRows);
-      const questions = selectedRows.map((row) => buildQuestionResponse(row, hintMap));
+      const questions = selectedRows.map((row) =>
+        buildQuestionResponse(row, hintMap),
+      );
 
       return NextResponse.json({
         account: {
@@ -791,6 +946,12 @@ export async function GET(request: NextRequest) {
         isUnitComplete: false,
         hasAdvancedAvailable: advancedAvailable,
         hasMoreReadingVariants: false,
+        setOverview: await buildSetOverviewForUnit({
+          db,
+          studentAccountId: account.id,
+          pool,
+          progress: overviewProgress,
+        }),
         questions,
       });
     }
@@ -801,10 +962,19 @@ export async function GET(request: NextRequest) {
         .map((row) => questionIdKey(row.id))
         .filter(Boolean);
 
-      const historyMap = await fetchReadingHistoryMap(db, account.id, questionIds);
-      const selectedRows = chooseOneReadingPerKanji(practiceSetPool, historyMap);
+      const historyMap = await fetchReadingHistoryMap(
+        db,
+        account.id,
+        questionIds,
+      );
+      const selectedRows = chooseOneReadingPerKanji(
+        practiceSetPool,
+        historyMap,
+      );
       const hintMap = await buildHintMapForRows(db, selectedRows);
-      const questions = selectedRows.map((row) => buildQuestionResponse(row, hintMap));
+      const questions = selectedRows.map((row) =>
+        buildQuestionResponse(row, hintMap),
+      );
 
       return NextResponse.json({
         account: {
@@ -821,7 +991,16 @@ export async function GET(request: NextRequest) {
         finished: questions.length === 0,
         isUnitComplete: false,
         hasAdvancedAvailable: advancedAvailable,
-        hasMoreReadingVariants: hasMoreReadingVariants(practiceSetPool, selectedRows),
+        hasMoreReadingVariants: hasMoreReadingVariants(
+          practiceSetPool,
+          selectedRows,
+        ),
+        setOverview: await buildSetOverviewForUnit({
+          db,
+          studentAccountId: account.id,
+          pool,
+          progress: overviewProgress,
+        }),
         questions,
       });
     }
@@ -833,7 +1012,9 @@ export async function GET(request: NextRequest) {
         .slice(0, QUESTION_LIMIT);
 
       const hintMap = await buildHintMapForRows(db, orderedRows);
-      const questions = orderedRows.map((row) => buildQuestionResponse(row, hintMap));
+      const questions = orderedRows.map((row) =>
+        buildQuestionResponse(row, hintMap),
+      );
 
       return NextResponse.json({
         account: {
@@ -851,11 +1032,17 @@ export async function GET(request: NextRequest) {
         isUnitComplete: false,
         hasAdvancedAvailable: advancedAvailable,
         hasMoreReadingVariants: false,
+        setOverview: await buildSetOverviewForUnit({
+          db,
+          studentAccountId: account.id,
+          pool,
+          progress: overviewProgress,
+        }),
         questions,
       });
     }
 
-    let progress = await getReadingProgress(db, account.id, unit, difficultyTier);
+    let progress = overviewProgress;
 
     if (startFromBeginning) {
       const preservedCompletedCount = progress?.completed_count ?? 0;
@@ -878,7 +1065,10 @@ export async function GET(request: NextRequest) {
         });
 
       if (resetError) {
-        return NextResponse.json({ error: resetError.message }, { status: 400 });
+        return NextResponse.json(
+          { error: resetError.message },
+          { status: 400 },
+        );
       }
 
       progress = {
@@ -890,6 +1080,37 @@ export async function GET(request: NextRequest) {
         is_completed: false,
         completed_count: preservedCompletedCount,
       };
+      overviewProgress = progress;
+    }
+
+    const unitHasBeenCompleted =
+      (progress?.completed_count ?? 0) >= 1 || progress?.is_completed === true;
+
+    if (unitHasBeenCompleted && !startFromBeginning) {
+      return NextResponse.json({
+        account: {
+          display_name: account.display_name,
+          student_login_id: account.student_login_id,
+        },
+        unit,
+        difficulty_tier: difficultyTier,
+        mode: "normal",
+        startOrder: null,
+        endOrder: null,
+        lastOrderCompleted: progress?.last_order_completed ?? 0,
+        completedCount: progress?.completed_count ?? 0,
+        finished: true,
+        isUnitComplete: true,
+        hasAdvancedAvailable: advancedAvailable,
+        hasMoreReadingVariants: false,
+        setOverview: await buildSetOverviewForUnit({
+          db,
+          studentAccountId: account.id,
+          pool,
+          progress: overviewProgress,
+        }),
+        questions: [],
+      });
     }
 
     const lastOrderCompleted = progress?.last_order_completed ?? 0;
@@ -897,13 +1118,15 @@ export async function GET(request: NextRequest) {
     const orderedRows = pool
       .filter(
         (row) =>
-          row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted
+          row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted,
       )
       .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
       .slice(0, QUESTION_LIMIT);
 
     const hintMap = await buildHintMapForRows(db, orderedRows);
-    const questions = orderedRows.map((row) => buildQuestionResponse(row, hintMap));
+    const questions = orderedRows.map((row) =>
+      buildQuestionResponse(row, hintMap),
+    );
 
     return NextResponse.json({
       account: {
@@ -921,12 +1144,18 @@ export async function GET(request: NextRequest) {
       isUnitComplete: questions.length === 0,
       hasAdvancedAvailable: advancedAvailable,
       hasMoreReadingVariants: false,
+      setOverview: await buildSetOverviewForUnit({
+        db,
+        studentAccountId: account.id,
+        pool,
+        progress: overviewProgress,
+      }),
       questions,
     });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -974,10 +1203,15 @@ export async function POST(request: NextRequest) {
         answered_at: now,
       }));
 
-      const { error: insertError } = await db.from("kanji_attempts").insert(rows);
+      const { error: insertError } = await db
+        .from("kanji_attempts")
+        .insert(rows);
 
       if (insertError) {
-        return NextResponse.json({ error: insertError.message }, { status: 400 });
+        return NextResponse.json(
+          { error: insertError.message },
+          { status: 400 },
+        );
       }
 
       await updateReadingQuestionHistory(db, account.id, unit, attempts, mode);
@@ -1001,12 +1235,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const progress = await getReadingProgress(db, account.id, unit, difficultyTier);
+    const progress = await getReadingProgress(
+      db,
+      account.id,
+      unit,
+      difficultyTier,
+    );
 
     const currentLastOrderCompleted =
       mode === "practice"
         ? 0
-        : baseLastOrderCompleted ?? progress?.last_order_completed ?? 0;
+        : (baseLastOrderCompleted ?? progress?.last_order_completed ?? 0);
 
     const currentCompletedCount = progress?.completed_count ?? 0;
     const maxAttemptOrder = getMaxAttemptOrder(attempts);
@@ -1039,12 +1278,15 @@ export async function POST(request: NextRequest) {
       });
 
     if (progressError) {
-      return NextResponse.json({ error: progressError.message }, { status: 400 });
+      return NextResponse.json(
+        { error: progressError.message },
+        { status: 400 },
+      );
     }
 
-    const hasRemaining = (await fetchQuestionPool(db, unit, difficultyTier)).some(
-      (row) => (row.order_in_unit ?? 0) > newLastOrderCompleted
-    );
+    const hasRemaining = (
+      await fetchQuestionPool(db, unit, difficultyTier)
+    ).some((row) => (row.order_in_unit ?? 0) > newLastOrderCompleted);
 
     if (!hasRemaining) {
       const nextCompletedCount = currentRunWasAlreadyComplete
@@ -1068,7 +1310,10 @@ export async function POST(request: NextRequest) {
         });
 
       if (completeError) {
-        return NextResponse.json({ error: completeError.message }, { status: 400 });
+        return NextResponse.json(
+          { error: completeError.message },
+          { status: 400 },
+        );
       }
 
       return NextResponse.json({
@@ -1088,7 +1333,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

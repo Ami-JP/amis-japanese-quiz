@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -174,74 +174,6 @@ function getQuestionInstruction(question: CourseQuestion) {
   return "Answer the question.";
 }
 
-function buildInlineRubyParts(params: {
-  text: string;
-  rubyItems: RubyItem[];
-  keyPrefix: string;
-}) {
-  const { text, rubyItems, keyPrefix } = params;
-
-  const usableItems = rubyItems
-    .filter((item) => item.text && item.reading && text.includes(item.text))
-    .sort((a, b) => b.text.length - a.text.length);
-
-  if (usableItems.length === 0) {
-    return text;
-  }
-
-  const pattern = new RegExp(
-    usableItems.map((item) => escapeRegExp(item.text)).join("|"),
-    "g"
-  );
-
-  const readingMap = new Map(usableItems.map((item) => [item.text, item.reading]));
-  const nodes: ReactNode[] = [];
-  let lastIndex = 0;
-  let nodeIndex = 0;
-
-  for (const match of text.matchAll(pattern)) {
-    const matchedText = match[0];
-    const index = match.index ?? 0;
-    const reading = readingMap.get(matchedText);
-
-    if (index > lastIndex) {
-      nodes.push(text.slice(lastIndex, index));
-    }
-
-    if (reading) {
-      nodes.push(
-        <ruby key={`${keyPrefix}-ruby-${nodeIndex}`}>
-          {matchedText}
-          <rt>{reading}</rt>
-        </ruby>
-      );
-    } else {
-      nodes.push(matchedText);
-    }
-
-    lastIndex = index + matchedText.length;
-    nodeIndex += 1;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes;
-}
-
-function getQuestionTargetRubyItems(question: CourseQuestion) {
-  const annotationItems = parseRubyAnnotations(question.ruby_annotations);
-
-  return annotationItems.filter((item) => {
-    return (
-      item.text.length > 0 &&
-      item.text !== question.target_text &&
-      question.target_text.includes(item.text)
-    );
-  });
-}
-
 function highlightTarget(question: CourseQuestion) {
   const sentence = question.completed_sentence ?? question.prompt;
   const targetText = question.target_text;
@@ -250,7 +182,6 @@ function highlightTarget(question: CourseQuestion) {
     return sentence;
   }
 
-  const targetRubyItems = getQuestionTargetRubyItems(question);
   const parts = sentence.split(targetText);
 
   return parts.map((part, index) => (
@@ -258,11 +189,7 @@ function highlightTarget(question: CourseQuestion) {
       {part}
       {index < parts.length - 1 && (
         <mark className="targetMark">
-          {buildInlineRubyParts({
-            text: targetText,
-            rubyItems: targetRubyItems,
-            keyPrefix: `target-${index}`,
-          })}
+          {targetText}
         </mark>
       )}
     </span>
@@ -619,6 +546,7 @@ export default function CourseDayQuizPage() {
 
   const activeQuestionIdRef = useRef<string | null>(null);
   const saveSequenceRef = useRef(0);
+  const answerInputRef = useRef<HTMLInputElement | null>(null);
 
   const [finished, setFinished] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
@@ -643,6 +571,21 @@ export default function CourseDayQuizPage() {
   useEffect(() => {
     activeQuestionIdRef.current = currentQuestion?.id ?? null;
   }, [currentQuestion?.id]);
+
+  useEffect(() => {
+    if (!currentQuestion) return;
+    if (!isReadingQuestion(currentQuestion)) return;
+    if (answerResult) return;
+    if (finished || loading) return;
+
+    const timer = window.setTimeout(() => {
+      answerInputRef.current?.focus();
+    }, 50);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [currentQuestion?.id, answerResult, finished, loading]);
 
   const progressPercent =
     activeQuestions.length === 0
@@ -867,6 +810,25 @@ ${message}`);
 
     setCurrentIndex((previous) => previous + 1);
   }
+
+  useEffect(() => {
+    function handleGlobalEnter(event: KeyboardEvent) {
+      if (event.key !== "Enter") return;
+      if (event.isComposing) return;
+      if (!answerResult) return;
+      if (submitting || finished || loading) return;
+      if (!currentQuestion) return;
+
+      event.preventDefault();
+      handleNext();
+    }
+
+    window.addEventListener("keydown", handleGlobalEnter);
+
+    return () => {
+      window.removeEventListener("keydown", handleGlobalEnter);
+    };
+  });
 
   function handleRestart() {
     setCurrentIndex(0);
@@ -1107,6 +1069,7 @@ ${message}`);
               Reading
             </label>
             <input
+              ref={answerInputRef}
               id="answer-input"
               className="answerInput"
               value={typedAnswer}
@@ -1117,9 +1080,10 @@ ${message}`);
               autoCapitalize="off"
               spellCheck={false}
               onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleSubmit();
-                }
+                if (event.key !== "Enter") return;
+                if (event.nativeEvent.isComposing) return;
+
+                handleSubmit();
               }}
             />
 
