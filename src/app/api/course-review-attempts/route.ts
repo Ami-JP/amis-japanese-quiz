@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-type CourseRow = {
-  id: string;
-  course_slug: string;
-  title: string;
-  total_days: number;
-  is_published: boolean;
-};
 
 type CourseQuestionRow = {
   id: string;
@@ -32,22 +24,14 @@ type CourseQuestionRow = {
   is_published: boolean;
 };
 
-type CourseAttemptRow = {
-  course_question_id: string;
-  is_correct: boolean;
-  answered_at: string;
-};
-
-type CourseAttemptStatusRow = {
-  course_question_id: string;
-  question_order: number;
-  is_correct: boolean;
-  answered_at: string;
-};
-
 type StudentSessionResult = {
   student_account_id: string;
   expires_at?: string | null;
+};
+
+type StudentAccountRow = {
+  id: string;
+  is_active: boolean;
 };
 
 type KanjiHintRow = {
@@ -59,6 +43,21 @@ type KanjiHintRow = {
   example_words_ja: string | null;
   example_words_en: string | null;
 };
+
+type SelectionReason =
+  | "missed_multiple"
+  | "missed_once"
+  | "not_reviewed_yet"
+  | "not_recently_seen"
+  | "supplemental";
+
+const allowedSelectionReasons = new Set<SelectionReason>([
+  "missed_multiple",
+  "missed_once",
+  "not_reviewed_yet",
+  "not_recently_seen",
+  "supplemental",
+]);
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -85,6 +84,12 @@ function sha256Hex(value: string) {
 function isExpired(expiresAt?: string | null) {
   if (!expiresAt) return false;
   return new Date(expiresAt).getTime() < Date.now();
+}
+
+function isValidUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
 }
 
 async function getStudentAccountId(params: {
@@ -119,6 +124,22 @@ async function getStudentAccountId(params: {
 
   if (isExpired(typedSession.expires_at)) {
     throw new Error("Student session has expired.");
+  }
+
+  const { data: student, error: studentError } = await supabase
+    .from("student_accounts")
+    .select("id, is_active")
+    .eq("id", typedSession.student_account_id)
+    .maybeSingle();
+
+  if (studentError) {
+    throw new Error(`Failed to verify student account: ${studentError.message}`);
+  }
+
+  const typedStudent = student as StudentAccountRow | null;
+
+  if (!typedStudent?.id || !typedStudent.is_active) {
+    throw new Error("Student account is not active.");
   }
 
   return typedSession.student_account_id;
@@ -634,358 +655,14 @@ function getExplanationJa(params: {
   return question.explanation_ja;
 }
 
-async function getAttemptNumber(params: {
-  supabase: ReturnType<typeof getSupabaseAdmin>;
-  studentAccountId: string;
-  courseQuestionId: string;
-}) {
-  const { supabase, studentAccountId, courseQuestionId } = params;
+function getSelectionReason(value: unknown): SelectionReason {
+  if (typeof value !== "string") return "supplemental";
 
-  const { count, error } = await supabase
-    .from("course_attempts")
-    .select("id", { count: "exact", head: true })
-    .eq("student_account_id", studentAccountId)
-    .eq("course_question_id", courseQuestionId);
-
-  if (error) {
-    throw new Error(`Failed to count previous attempts: ${error.message}`);
+  if (allowedSelectionReasons.has(value as SelectionReason)) {
+    return value as SelectionReason;
   }
 
-  return (count ?? 0) + 1;
-}
-
-async function getTotalQuestionsForDay(params: {
-  supabase: ReturnType<typeof getSupabaseAdmin>;
-  courseId: string;
-  courseDayId: string;
-  dayNumber: number;
-  preview: boolean;
-}) {
-  const { supabase, courseId, courseDayId, dayNumber, preview } = params;
-
-  let query = supabase
-    .from("course_questions")
-    .select("id", { count: "exact", head: true })
-    .eq("course_id", courseId)
-    .eq("course_day_id", courseDayId)
-    .eq("day_number", dayNumber)
-    .eq("status", "ready");
-
-  if (!preview) {
-    query = query.eq("is_published", true);
-  }
-
-  const { count, error } = await query;
-
-  if (error) {
-    throw new Error(`Failed to count day questions: ${error.message}`);
-  }
-
-  return count ?? 0;
-}
-
-async function recalculateProgress(params: {
-  supabase: ReturnType<typeof getSupabaseAdmin>;
-  studentAccountId: string;
-  question: CourseQuestionRow;
-  totalQuestions: number;
-}) {
-  const { supabase, studentAccountId, question, totalQuestions } = params;
-
-  const { data: attempts, error: attemptsError } = await supabase
-    .from("course_attempts")
-    .select("course_question_id, is_correct, answered_at")
-    .eq("student_account_id", studentAccountId)
-    .eq("course_id", question.course_id)
-    .eq("day_number", question.day_number)
-    .order("answered_at", { ascending: true });
-
-  if (attemptsError) {
-    throw new Error(`Failed to fetch attempts: ${attemptsError.message}`);
-  }
-
-  const latestByQuestion = new Map<string, CourseAttemptRow>();
-
-  for (const attempt of (attempts ?? []) as CourseAttemptRow[]) {
-    latestByQuestion.set(attempt.course_question_id, attempt);
-  }
-
-  const latestAttempts = Array.from(latestByQuestion.values());
-
-  const answeredCount = latestAttempts.length;
-  const correctCount = latestAttempts.filter((attempt) => attempt.is_correct).length;
-  const incorrectCount = Math.max(answeredCount - correctCount, 0);
-
-  const status =
-    answeredCount === 0
-      ? "not_started"
-      : totalQuestions > 0 && answeredCount >= totalQuestions
-        ? incorrectCount > 0
-          ? "review_needed"
-          : "completed"
-        : "in_progress";
-
-  const completedAt =
-    status === "completed" || status === "review_needed"
-      ? new Date().toISOString()
-      : null;
-
-  const lastAnsweredAt = new Date().toISOString();
-
-  const { data: progress, error: progressError } = await supabase
-    .from("course_progress")
-    .upsert(
-      {
-        student_account_id: studentAccountId,
-        course_id: question.course_id,
-        course_day_id: question.course_day_id,
-        day_number: question.day_number,
-        status,
-        total_questions: totalQuestions,
-        answered_count: answeredCount,
-        correct_count: correctCount,
-        incorrect_count: incorrectCount,
-        completed_at: completedAt,
-        last_answered_at: lastAnsweredAt,
-      },
-      {
-        onConflict: "student_account_id,course_id,day_number",
-      }
-    )
-    .select(
-      `
-      id,
-      day_number,
-      status,
-      total_questions,
-      answered_count,
-      correct_count,
-      incorrect_count,
-      accuracy,
-      completed_at,
-      last_answered_at
-    `
-    )
-    .maybeSingle();
-
-  if (progressError) {
-    throw new Error(`Failed to update progress: ${progressError.message}`);
-  }
-
-  return progress;
-}
-
-export async function GET(request: NextRequest) {
-  try {
-    const supabase = getSupabaseAdmin();
-
-    const { searchParams } = new URL(request.url);
-    const courseSlug = searchParams.get("course_slug")?.trim() || "";
-    const dayNumber = Number(searchParams.get("day") || "");
-    const previewRequested = searchParams.get("preview") === "1";
-
-    const previewAllowed =
-      process.env.NODE_ENV !== "production" ||
-      process.env.ALLOW_COURSE_PREVIEW === "true";
-
-    if (previewRequested && !previewAllowed) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Preview mode is not allowed. Set ALLOW_COURSE_PREVIEW=true if you need draft preview.",
-        },
-        { status: 403 }
-      );
-    }
-
-    if (!courseSlug) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "course_slug is required.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!Number.isInteger(dayNumber) || dayNumber <= 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "day is required.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const studentAccountId = await getStudentAccountId({
-      supabase,
-      request,
-    });
-
-    const { data: course, error: courseError } = await supabase
-      .from("courses")
-      .select("id, course_slug, title, total_days, is_published")
-      .eq("course_slug", courseSlug)
-      .maybeSingle();
-
-    if (courseError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Failed to fetch course.",
-          detail: courseError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!course) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Course not found.",
-        },
-        { status: 404 }
-      );
-    }
-
-    const typedCourse = course as CourseRow;
-
-    await assertCourseEnrollment({
-      supabase,
-      studentAccountId,
-      courseId: typedCourse.id,
-    });
-
-    let questionQuery = supabase
-      .from("course_questions")
-      .select("id, question_order")
-      .eq("course_id", typedCourse.id)
-      .eq("day_number", dayNumber)
-      .eq("status", "ready")
-      .order("question_order", { ascending: true });
-
-    if (!previewRequested) {
-      questionQuery = questionQuery.eq("is_published", true);
-    }
-
-    const { data: questions, error: questionsError } = await questionQuery;
-
-    if (questionsError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Failed to fetch day questions.",
-          detail: questionsError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    const questionIds = new Set(
-      ((questions ?? []) as { id: string; question_order: number }[]).map(
-        (question) => question.id
-      )
-    );
-
-    const { data: attemptsRaw, error: attemptsError } = await supabase
-      .from("course_attempts")
-      .select("course_question_id, question_order, is_correct, answered_at")
-      .eq("student_account_id", studentAccountId)
-      .eq("course_id", typedCourse.id)
-      .eq("day_number", dayNumber)
-      .order("answered_at", { ascending: true });
-
-    if (attemptsError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Failed to fetch course attempts.",
-          detail: attemptsError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    const latestByQuestion = new Map<string, CourseAttemptStatusRow>();
-
-    for (const attempt of (attemptsRaw ?? []) as CourseAttemptStatusRow[]) {
-      if (questionIds.has(attempt.course_question_id)) {
-        latestByQuestion.set(attempt.course_question_id, attempt);
-      }
-    }
-
-    const latestAttempts = Array.from(latestByQuestion.values()).sort(
-      (a, b) => a.question_order - b.question_order
-    );
-
-    const answeredQuestionIds = latestAttempts.map(
-      (attempt) => attempt.course_question_id
-    );
-
-    const missedQuestionIds = latestAttempts
-      .filter((attempt) => !attempt.is_correct)
-      .map((attempt) => attempt.course_question_id);
-
-    const { data: progress, error: progressError } = await supabase
-      .from("course_progress")
-      .select(
-        `
-        id,
-        day_number,
-        status,
-        total_questions,
-        answered_count,
-        correct_count,
-        incorrect_count,
-        accuracy,
-        completed_at,
-        last_answered_at
-      `
-      )
-      .eq("student_account_id", studentAccountId)
-      .eq("course_id", typedCourse.id)
-      .eq("day_number", dayNumber)
-      .maybeSingle();
-
-    if (progressError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Failed to fetch course progress.",
-          detail: progressError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      ok: true,
-      answered_question_ids: answeredQuestionIds,
-      missed_question_ids: missedQuestionIds,
-      progress,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unexpected server error.";
-
-    const status =
-      message.includes("session") ||
-      message.includes("Student") ||
-      message.includes("not enrolled")
-        ? 401
-        : 500;
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: message,
-      },
-      { status }
-    );
-  }
+  return "supplemental";
 }
 
 export async function POST(request: NextRequest) {
@@ -1012,22 +689,12 @@ export async function POST(request: NextRequest) {
     const userAnswer =
       typeof body.user_answer === "string" ? body.user_answer.trim() : "";
 
-    const previewRequested = body.preview === true || body.preview === "1";
+    const reviewSessionId =
+      typeof body.review_session_id === "string"
+        ? body.review_session_id.trim()
+        : "";
 
-    const previewAllowed =
-      process.env.NODE_ENV !== "production" ||
-      process.env.ALLOW_COURSE_PREVIEW === "true";
-
-    if (previewRequested && !previewAllowed) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Preview mode is not allowed. Set ALLOW_COURSE_PREVIEW=true if you need draft preview.",
-        },
-        { status: 403 }
-      );
-    }
+    const selectionReason = getSelectionReason(body.selection_reason);
 
     if (!courseQuestionId) {
       return NextResponse.json(
@@ -1049,12 +716,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (reviewSessionId && !isValidUuid(reviewSessionId)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "review_session_id must be a valid UUID.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const safeReviewSessionId = reviewSessionId || randomUUID();
+
     const studentAccountId = await getStudentAccountId({
       supabase,
       request,
     });
 
-    let questionQuery = supabase
+    const { data: question, error: questionError } = await supabase
       .from("course_questions")
       .select(
         `
@@ -1076,13 +755,10 @@ export async function POST(request: NextRequest) {
         is_published
       `
       )
-      .eq("id", courseQuestionId);
-
-    if (!previewRequested) {
-      questionQuery = questionQuery.eq("is_published", true).eq("status", "ready");
-    }
-
-    const { data: question, error: questionError } = await questionQuery.maybeSingle();
+      .eq("id", courseQuestionId)
+      .eq("is_published", true)
+      .eq("status", "ready")
+      .maybeSingle();
 
     if (questionError) {
       return NextResponse.json(
@@ -1102,16 +778,6 @@ export async function POST(request: NextRequest) {
           error: "Course question not found or not published.",
         },
         { status: 404 }
-      );
-    }
-
-    if (question.status !== "ready" && !previewRequested) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "This question is not available.",
-        },
-        { status: 403 }
       );
     }
 
@@ -1144,14 +810,8 @@ export async function POST(request: NextRequest) {
       question: typedQuestion,
     });
 
-    const attemptNumber = await getAttemptNumber({
-      supabase,
-      studentAccountId,
-      courseQuestionId: typedQuestion.id,
-    });
-
     const { data: insertedAttempt, error: insertAttemptError } = await supabase
-      .from("course_attempts")
+      .from("course_review_attempts")
       .insert({
         student_account_id: studentAccountId,
         course_id: typedQuestion.course_id,
@@ -1164,7 +824,8 @@ export async function POST(request: NextRequest) {
         user_answer: userAnswer,
         correct_answer: correctAnswer,
         is_correct: isCorrect,
-        attempt_number: attemptNumber,
+        review_session_id: safeReviewSessionId,
+        selection_reason: selectionReason,
       })
       .select(
         `
@@ -1173,7 +834,8 @@ export async function POST(request: NextRequest) {
         user_answer,
         correct_answer,
         is_correct,
-        attempt_number,
+        review_session_id,
+        selection_reason,
         answered_at
       `
       )
@@ -1183,27 +845,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Failed to save course attempt.",
+          error: "Failed to save review attempt.",
           detail: insertAttemptError.message,
         },
         { status: 500 }
       );
     }
-
-    const totalQuestions = await getTotalQuestionsForDay({
-      supabase,
-      courseId: typedQuestion.course_id,
-      courseDayId: typedQuestion.course_day_id,
-      dayNumber: typedQuestion.day_number,
-      preview: previewRequested,
-    });
-
-    const progress = await recalculateProgress({
-      supabase,
-      studentAccountId,
-      question: typedQuestion,
-      totalQuestions,
-    });
 
     return NextResponse.json({
       ok: true,
@@ -1216,7 +863,6 @@ export async function POST(request: NextRequest) {
         kanji_hint: kanjiHint,
       },
       attempt: insertedAttempt,
-      progress,
     });
   } catch (error) {
     const message =
@@ -1225,7 +871,8 @@ export async function POST(request: NextRequest) {
     const status =
       message.includes("session") ||
       message.includes("Student") ||
-      message.includes("not enrolled")
+      message.includes("not enrolled") ||
+      message.includes("not active")
         ? 401
         : 500;
 

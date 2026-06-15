@@ -306,6 +306,33 @@ export default function CourseHomePage() {
           </div>
         </section>
 
+        <section className="extraPracticeCard" aria-label="Extra Practice">
+          <div className="extraPracticeText">
+            <span className="extraPracticeBadge">Special</span>
+            <h2>ちょっと余裕がある日だけの特別練習</h2>
+            <p className="extraPracticeSub">
+              Special practice for days when you have a little extra time
+            </p>
+            <p className="extraPracticeLead">
+              今までの問題を振り返って、苦手を少しだけ減らそう♪
+              <br />
+              Let’s look back at the questions you’ve tried and reduce your weak
+              points little by little.
+            </p>
+          </div>
+
+          <div className="extraPracticeAction">
+            <div className="extraPracticeIcon">🌟</div>
+            <Link
+              className="extraPracticeButton"
+              href={`/course/${encodeURIComponent(courseSlug)}/review`}
+            >
+              <span>特別練習</span>
+              <small>Extra Practice</small>
+            </Link>
+          </div>
+        </section>
+
         <section className="legendPanel" aria-label="Map color guide">
           <div className="legendItem">
             <span className="legendDot completedDot" />
@@ -638,6 +665,123 @@ const styles = `
     height: 100%;
     border-radius: 999px;
     background: linear-gradient(90deg, #a3e635, #84cc16);
+  }
+
+  .extraPracticeCard {
+    margin: 14px 0 0;
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    align-items: center;
+    border-radius: 28px;
+    background:
+      radial-gradient(circle at 12% 20%, rgba(253, 224, 71, 0.28), transparent 26%),
+      radial-gradient(circle at 88% 18%, rgba(216, 180, 254, 0.28), transparent 24%),
+      linear-gradient(135deg, rgba(76, 29, 149, 0.96), rgba(91, 33, 182, 0.9) 46%, rgba(30, 41, 59, 0.92));
+    border: 1px solid rgba(221, 214, 254, 0.35);
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+  }
+
+  .extraPracticeText {
+    min-width: 0;
+  }
+
+  .extraPracticeBadge {
+    display: inline-flex;
+    margin-bottom: 8px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: rgba(255, 251, 235, 0.94);
+    color: #581c87;
+    font-size: 11px;
+    font-weight: 950;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .extraPracticeText h2 {
+    margin: 0;
+    color: #fff7ed;
+    font-size: clamp(22px, 4vw, 34px);
+    font-weight: 950;
+    line-height: 1.25;
+    letter-spacing: 0.01em;
+  }
+
+  .extraPracticeSub {
+    margin: 6px 0 0;
+    color: #fde68a;
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1.45;
+  }
+
+  .extraPracticeLead {
+    margin: 10px 0 0;
+    color: #e9d5ff;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.65;
+  }
+
+  .extraPracticeAction {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .extraPracticeIcon {
+    width: 72px;
+    height: 72px;
+    flex: 0 0 auto;
+    border-radius: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 251, 235, 0.94);
+    box-shadow:
+      0 8px 0 rgba(146, 64, 14, 0.7),
+      0 14px 24px rgba(0, 0, 0, 0.24);
+    font-size: 38px;
+  }
+
+  .extraPracticeButton {
+    min-width: 178px;
+    min-height: 58px;
+    padding: 13px 18px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 2px;
+    background: linear-gradient(180deg, #fef08a, #facc15 54%, #f59e0b);
+    color: #451a03;
+    text-decoration: none;
+    box-shadow:
+      0 8px 0 #92400e,
+      0 14px 28px rgba(0, 0, 0, 0.24);
+    transition:
+      transform 140ms ease,
+      filter 140ms ease;
+  }
+
+  .extraPracticeButton:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.04);
+  }
+
+  .extraPracticeButton span {
+    font-size: 17px;
+    font-weight: 950;
+    line-height: 1.1;
+  }
+
+  .extraPracticeButton small {
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1.1;
   }
 
   .legendPanel {
@@ -1115,6 +1259,39 @@ const styles = `
       font-size: 21px;
     }
 
+    .extraPracticeCard {
+      grid-template-columns: 1fr;
+      gap: 14px;
+      padding: 18px;
+      border-radius: 26px;
+    }
+
+    .extraPracticeText h2 {
+      font-size: 24px;
+    }
+
+    .extraPracticeSub,
+    .extraPracticeLead {
+      font-size: 13px;
+    }
+
+    .extraPracticeAction {
+      width: 100%;
+      align-items: stretch;
+    }
+
+    .extraPracticeIcon {
+      width: 58px;
+      height: 58px;
+      border-radius: 20px;
+      font-size: 31px;
+    }
+
+    .extraPracticeButton {
+      flex: 1;
+      min-width: 0;
+    }
+
     .legendPanel {
       margin-top: 10px;
       padding: 8px 9px;
@@ -1219,6 +1396,18 @@ const styles = `
 
     .legendItem {
       flex: 0 1 auto;
+    }
+
+    .extraPracticeAction {
+      flex-direction: column;
+    }
+
+    .extraPracticeIcon {
+      display: none;
+    }
+
+    .extraPracticeButton {
+      width: 100%;
     }
 
     .mapRow {
