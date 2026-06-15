@@ -69,6 +69,7 @@ type BatchResponse = {
   unit: string;
   difficulty_tier: string;
   mode: "normal" | "practice-set" | "review-wrong" | "practice";
+  setNumber?: number | null;
   startOrder?: number | null;
   endOrder?: number | null;
   lastOrderCompleted: number;
@@ -283,12 +284,14 @@ function KanjiReadingQuizInner() {
   const rawMode = (searchParams.get("mode") ?? "normal").trim();
   const startOrderParam = (searchParams.get("startOrder") ?? "").trim();
   const endOrderParam = (searchParams.get("endOrder") ?? "").trim();
+  const setNumberParam = (searchParams.get("setNumber") ?? "").trim();
 
   const initialMode: "normal" | "practice-set" =
     rawMode === "practice-set" ? "practice-set" : "normal";
 
   const startOrder = startOrderParam ? Number(startOrderParam) : null;
   const endOrder = endOrderParam ? Number(endOrderParam) : null;
+  const setNumber = setNumberParam ? Number(setNumberParam) : null;
 
   const windowWidth = useWindowWidth();
   const isDesktop = windowWidth >= 1200;
@@ -335,9 +338,18 @@ function KanjiReadingQuizInner() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
+  function focusInputSoon() {
+    if (!isDesktop && !isTablet) return;
+
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 80);
+  }
+
   async function loadBatch(
     mode: "normal" | "practice-set",
     options?: {
+      setNumber?: number | null;
       startOrder?: number | null;
       endOrder?: number | null;
       startFromBeginning?: boolean;
@@ -372,9 +384,11 @@ function KanjiReadingQuizInner() {
     params.set("mode", mode);
 
     if (mode === "practice-set") {
+      const nextSetNumber = options?.setNumber ?? setNumber;
       const nextStart = options?.startOrder ?? startOrder;
       const nextEnd = options?.endOrder ?? endOrder;
 
+      if (nextSetNumber != null) params.set("setNumber", String(nextSetNumber));
       if (nextStart != null) params.set("startOrder", String(nextStart));
       if (nextEnd != null) params.set("endOrder", String(nextEnd));
     }
@@ -405,9 +419,7 @@ function KanjiReadingQuizInner() {
     setBatch(data);
     setLoading(false);
 
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 80);
+    focusInputSoon();
   }
 
   useEffect(() => {
@@ -458,7 +470,7 @@ function KanjiReadingQuizInner() {
     }
 
     init();
-  }, [unit, difficultyTier, initialMode, startOrderParam, endOrderParam]);
+  }, [unit, difficultyTier, initialMode, startOrderParam, endOrderParam, setNumberParam]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -487,9 +499,7 @@ function KanjiReadingQuizInner() {
     setChecked(false);
     setWasCorrect(null);
 
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 80);
+    focusInputSoon();
   }, [currentQuestion?.id]);
 
   function getCurrentInputValue() {
@@ -844,9 +854,7 @@ function KanjiReadingQuizInner() {
     setShowUnitStartScreen(false);
     setMenuOpen(false);
 
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 80);
+    focusInputSoon();
   }
 
   async function handleLogout() {
@@ -872,11 +880,12 @@ function KanjiReadingQuizInner() {
   async function handlePracticeMoreReadings() {
     if (!batch) return;
     if (batch.mode !== "practice-set") return;
-    if (batch.startOrder == null || batch.endOrder == null) return;
+    if (batch.setNumber == null && (batch.startOrder == null || batch.endOrder == null)) return;
 
     await loadBatch("practice-set", {
-      startOrder: batch.startOrder,
-      endOrder: batch.endOrder,
+      setNumber: batch.setNumber ?? null,
+      startOrder: batch.startOrder ?? null,
+      endOrder: batch.endOrder ?? null,
     });
   }
 
@@ -900,9 +909,7 @@ function KanjiReadingQuizInner() {
     setShowHint(false);
     setMenuOpen(false);
 
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 80);
+    focusInputSoon();
   }
 
   async function loadStartScreenBatch(options?: { startFromBeginning?: boolean }) {
@@ -964,9 +971,7 @@ function KanjiReadingQuizInner() {
       setCurrentMode("normal");
       setReviewQuestions(null);
       setShowUnitStartScreen(false);
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 80);
+      focusInputSoon();
       return;
     }
 
@@ -989,6 +994,7 @@ function KanjiReadingQuizInner() {
     if (item.status === "soon") return;
 
     await loadBatch("practice-set", {
+      setNumber: item.setNumber,
       startOrder: item.startOrder,
       endOrder: item.endOrder,
     });
@@ -1114,7 +1120,7 @@ function KanjiReadingQuizInner() {
       <div
         style={{
           ...styles.hintPanel,
-          padding: mobile ? "12px 10px 8px" : "12px 12px 8px",
+          padding: mobile ? "8px 8px 6px" : "10px 10px 6px",
         }}
       >
         <div style={styles.hintTopBox}>
@@ -1140,7 +1146,7 @@ function KanjiReadingQuizInner() {
                 <div
                   style={{
                     ...styles.hintKanji,
-                    fontSize: mobile ? 34 : 48,
+                    fontSize: mobile ? 30 : 42,
                   }}
                 >
                   {item.kanji}
@@ -1646,8 +1652,30 @@ function KanjiReadingQuizInner() {
     width: "100%",
   };
 
-  const compactQuestionNumberSize = isDesktop ? 88 : isTablet ? 64 : 52;
-  const compactQuestionFont = isDesktop ? 48 : isTablet ? 34 : 26;
+  const compactQuestionNumberSize = isDesktop
+    ? 88
+    : isTablet
+    ? 60
+    : isSmallPhone
+    ? 40
+    : 44;
+  const compactQuestionFont = isDesktop ? 48 : isTablet ? 32 : isSmallPhone ? 22 : 24;
+
+  const currentSetNumber =
+    currentMode === "review"
+      ? null
+      : batch?.mode === "practice-set"
+      ? batch.setNumber ?? null
+      : batch?.setOverview?.todaySetNumber ?? null;
+
+  const quizSetBadgeText =
+    currentMode === "review"
+      ? "Review"
+      : currentSetNumber != null
+      ? `Set ${currentSetNumber}`
+      : batch?.mode === "practice-set"
+      ? "Practice Set"
+      : "Today's Set";
 
   return (
     <main style={styles.page}>
@@ -1656,9 +1684,9 @@ function KanjiReadingQuizInner() {
           ...styles.appFrame,
           width: isDesktop
             ? "min(1680px, calc(100vw - 72px))"
-            : "min(1000px, calc(100vw - 20px))",
+            : "min(1000px, calc(100vw - 12px))",
           height: isDesktop ? "calc(100dvh - 48px)" : "auto",
-          minHeight: isDesktop ? undefined : "calc(100dvh - 20px)",
+          minHeight: isDesktop ? undefined : "calc(100dvh - 12px)",
         }}
       >
         <div
@@ -1673,8 +1701,8 @@ function KanjiReadingQuizInner() {
         <div
           style={{
             ...styles.windowBar,
-            minHeight: isDesktop ? 66 : 58,
-            padding: isDesktop ? "7px 30px" : "8px 14px",
+            minHeight: isDesktop ? 66 : isTablet ? 54 : 46,
+            padding: isDesktop ? "7px 30px" : isTablet ? "7px 14px" : "5px 10px",
           }}
         >
           <div style={{ ...styles.windowDots, gap: isDesktop ? 16 : 10 }}>
@@ -1751,9 +1779,9 @@ function KanjiReadingQuizInner() {
                 <button
                   type="button"
                   style={styles.menuItem}
-                  onClick={goHome}
+                  onClick={handleBackToUnitMap}
                 >
-                  Back to Home
+                  Back to Set Map
                 </button>
 
                 <button
@@ -1776,16 +1804,28 @@ function KanjiReadingQuizInner() {
           style={{
             ...styles.contentOuter,
             padding: isDesktop
-              ? "4px 24px 2px"
+              ? "2px 24px 2px"
               : isTablet
-              ? "8px 14px 20px"
-              : "8px 12px 18px",
+              ? "6px 12px 14px"
+              : "5px 10px 10px",
             display: "flex",
             flexDirection: "column",
-            gap: isDesktop ? 1 : 10,
+            gap: isDesktop ? 1 : isTablet ? 7 : 5,
             minHeight: isDesktop ? "calc(100% - 66px)" : "auto",
           }}
         >
+          <div
+            style={{
+              ...styles.quizSetBadge,
+              top: isDesktop ? 8 : isTablet ? 8 : 6,
+              right: isDesktop ? 26 : isTablet ? 14 : 12,
+              fontSize: isDesktop ? 13 : isTablet ? 12 : 11,
+              padding: isDesktop ? "5px 12px" : "4px 9px",
+            }}
+          >
+            {quizSetBadgeText}
+          </div>
+
           <div
             style={{
               ...styles.topTitleArea,
@@ -1803,10 +1843,10 @@ function KanjiReadingQuizInner() {
                   fontSize: isDesktop
                     ? 44
                     : isTablet
-                    ? 32
+                    ? 30
                     : isSmallPhone
-                    ? 24
-                    : 28,
+                    ? 21
+                    : 23,
                   lineHeight: isDesktop ? 1.03 : 1.06,
                 }}
               >
@@ -1815,7 +1855,7 @@ function KanjiReadingQuizInner() {
               <div
                 style={{
                   ...styles.smallTitle,
-                  fontSize: isDesktop ? 22 : isTablet ? 18 : 15,
+                  fontSize: isDesktop ? 22 : isTablet ? 17 : 13,
                 }}
               >
                 〜この漢字、読めるかな？〜
@@ -1912,8 +1952,8 @@ function KanjiReadingQuizInner() {
                     <div
                       style={{
                         ...styles.promptCard,
-                        minHeight: shouldWrapPrompt ? 184 : 164,
-                        padding: shouldWrapPrompt ? "10px 22px" : "8px 18px",
+                        minHeight: shouldWrapPrompt ? 158 : 140,
+                        padding: shouldWrapPrompt ? "8px 18px" : "6px 16px",
                         transform: "translateX(-56px)",
                         width: "calc(100% + 56px)",
                       }}
@@ -1938,8 +1978,8 @@ function KanjiReadingQuizInner() {
                       alt="character"
                       fallback={<span style={{ fontSize: 120 }}>🤔</span>}
                       style={{
-                        width: 320,
-                        height: 320,
+                        width: 250,
+                        height: 250,
                         objectFit: "contain",
                         userSelect: "none",
                         pointerEvents: "none",
@@ -1952,8 +1992,8 @@ function KanjiReadingQuizInner() {
                   style={{
                     ...styles.desktopBottom,
                     gridTemplateColumns: shouldShowHint
-                      ? "minmax(0, 1fr) minmax(410px, 0.94fr)"
-                      : "minmax(0, 1fr) 304px",
+                      ? "minmax(0, 1fr) minmax(390px, 0.9fr)"
+                      : "minmax(0, 1fr) 290px",
                   }}
                 >
                   <div style={styles.inputBlockDesktop}>
@@ -2120,8 +2160,8 @@ function KanjiReadingQuizInner() {
                     alt="character"
                     fallback={<span style={{ fontSize: 44 }}>🤔</span>}
                     style={{
-                      width: 82,
-                      height: 82,
+                      width: isSmallPhone ? 54 : 60,
+                      height: isSmallPhone ? 54 : 60,
                       objectFit: "contain",
                     }}
                   />
@@ -2133,20 +2173,20 @@ function KanjiReadingQuizInner() {
                   ...styles.promptCard,
                   minHeight: isTablet
                     ? shouldWrapPrompt
-                      ? 166
-                      : 150
+                      ? 146
+                      : 126
                     : isSmallPhone
                     ? shouldWrapPrompt
-                      ? 132
-                      : 110
+                      ? 104
+                      : 86
                     : shouldWrapPrompt
-                    ? 144
-                    : 126,
+                    ? 112
+                    : 94,
                   padding: isTablet
-                    ? "14px 18px"
+                    ? "10px 14px"
                     : isSmallPhone
-                    ? "12px 12px"
-                    : "14px 14px",
+                    ? "8px 10px"
+                    : "9px 10px",
                 }}
               >
                 <div style={promptTextFitStyle}>
@@ -2179,7 +2219,13 @@ function KanjiReadingQuizInner() {
                 <button
                   type="button"
                   onClick={() => setShowFurigana((prev) => !prev)}
-                  style={styles.sideBlueButtonMobile}
+                  style={{
+                    ...styles.sideBlueButtonMobile,
+                    minHeight: isTablet ? 62 : 50,
+                    fontSize: isTablet ? 12 : 10,
+                    padding: isTablet ? "7px 8px" : "5px 6px",
+                    borderWidth: isTablet ? 4 : 3,
+                  }}
                 >
                   <span style={styles.centeredButtonText}>ふりがなを表示</span>
                   <span style={styles.centeredButtonText}>Show Furigana</span>
@@ -2197,7 +2243,13 @@ function KanjiReadingQuizInner() {
                 <button
                   type="button"
                   onClick={() => setShowEnglish((prev) => !prev)}
-                  style={styles.sidePinkButtonMobile}
+                  style={{
+                    ...styles.sidePinkButtonMobile,
+                    minHeight: isTablet ? 62 : 50,
+                    fontSize: isTablet ? 12 : 10,
+                    padding: isTablet ? "7px 8px" : "5px 6px",
+                    borderWidth: isTablet ? 4 : 3,
+                  }}
                 >
                   <span style={styles.centeredButtonText}>英訳</span>
                   <span style={styles.centeredButtonText}>Show English</span>
@@ -2226,17 +2278,19 @@ function KanjiReadingQuizInner() {
                       style={{
                         ...styles.hintButton,
                         width: "100%",
-                        minHeight: isTablet ? 84 : 74,
+                        minHeight: isTablet ? 70 : 56,
+                        borderRadius: isTablet ? 24 : 22,
+                        padding: isTablet ? "7px 12px" : "5px 10px",
                         boxShadow: isTablet
-                          ? "10px 10px 0 #9ec1f0"
-                          : "8px 8px 0 #9ec1f0",
+                          ? "8px 8px 0 #9ec1f0"
+                          : "6px 6px 0 #9ec1f0",
                       }}
                     >
                       <span style={styles.hintMiniText}>ヒントを見る</span>
                       <span
                         style={{
                           ...styles.hintMainText,
-                          fontSize: isTablet ? 46 : 34,
+                          fontSize: isTablet ? 38 : 28,
                         }}
                       >
                         Hint
@@ -2252,8 +2306,8 @@ function KanjiReadingQuizInner() {
                           alt="bulb"
                           fallback={<span style={{ fontSize: 56 }}>💡</span>}
                           style={{
-                            width: isTablet ? 86 : 68,
-                            height: isTablet ? 86 : 68,
+                            width: isTablet ? 68 : 48,
+                            height: isTablet ? 68 : 48,
                             objectFit: "contain",
                           }}
                         />
@@ -2268,8 +2322,8 @@ function KanjiReadingQuizInner() {
               <div
                 style={{
                   ...styles.inputTitleMobile,
-                  marginTop: isTablet ? 24 : 18,
-                  fontSize: isTablet ? 24 : 20,
+                  marginTop: isTablet ? 12 : 7,
+                  fontSize: isTablet ? 22 : 18,
                 }}
               >
                 読みを入力
@@ -2281,15 +2335,15 @@ function KanjiReadingQuizInner() {
                 style={{
                   ...styles.inputRowMobile,
                   gridTemplateColumns: isTablet
-                    ? "44px minmax(0, 1fr)"
-                    : "40px minmax(0, 1fr)",
-                  gap: isTablet ? 10 : 6,
+                    ? "40px minmax(0, 1fr)"
+                    : "32px minmax(0, 1fr)",
+                  gap: isTablet ? 8 : 5,
                 }}
               >
                 <div
                   style={{
                     ...styles.arrowMobile,
-                    fontSize: isTablet ? 34 : 28,
+                    fontSize: isTablet ? 30 : 24,
                   }}
                 >
                   »»
@@ -2319,8 +2373,8 @@ function KanjiReadingQuizInner() {
                   spellCheck={false}
                   style={{
                     ...styles.answerInputMobile,
-                    height: isTablet ? 62 : 56,
-                    fontSize: isTablet ? 28 : 22,
+                    height: isTablet ? 56 : 46,
+                    fontSize: isTablet ? 26 : 21,
                   }}
                 />
               </div>
@@ -2329,7 +2383,7 @@ function KanjiReadingQuizInner() {
                 <div
                   style={{
                     ...styles.correctMobile,
-                    fontSize: isTablet ? 26 : 22,
+                    fontSize: isTablet ? 24 : 20,
                   }}
                 >
                   <AssetImage
@@ -2337,8 +2391,8 @@ function KanjiReadingQuizInner() {
                     alt="correct"
                     fallback={<span style={{ fontSize: 28 }}>👍</span>}
                     style={{
-                      width: isTablet ? 88 : 74,
-                      height: isTablet ? 52 : 44,
+                      width: isTablet ? 72 : 56,
+                      height: isTablet ? 42 : 34,
                       objectFit: "contain",
                     }}
                   />
@@ -2354,8 +2408,8 @@ function KanjiReadingQuizInner() {
                       alt="wrong"
                       fallback={<span style={{ fontSize: 26 }}>☹️</span>}
                       style={{
-                        width: isTablet ? 44 : 38,
-                        height: isTablet ? 44 : 38,
+                        width: isTablet ? 38 : 30,
+                        height: isTablet ? 38 : 30,
                         objectFit: "contain",
                       }}
                     />
@@ -2364,7 +2418,7 @@ function KanjiReadingQuizInner() {
                   <div
                     style={{
                       ...styles.wrongAnswerMobile,
-                      fontSize: isTablet ? 28 : 24,
+                      fontSize: isTablet ? 26 : 21,
                     }}
                   >
                     {currentQuestion.answer_text}
@@ -2375,7 +2429,7 @@ function KanjiReadingQuizInner() {
               <div
                 style={{
                   ...styles.bottomButtonRowMobile,
-                  marginTop: isTablet ? 14 : 12,
+                  marginTop: isTablet ? 10 : 6,
                 }}
               >
                 <button
@@ -2391,8 +2445,8 @@ function KanjiReadingQuizInner() {
                       saving || !getCurrentInputValue().trim()
                         ? "not-allowed"
                         : "pointer",
-                    fontSize: isTablet ? 20 : 16,
-                    padding: isTablet ? "12px 18px" : "10px 14px",
+                    fontSize: isTablet ? 19 : 16,
+                    padding: isTablet ? "10px 18px" : "8px 12px",
                   }}
                 >
                   {saving ? "Saving..." : checked ? "Next" : "Check"}
@@ -2802,6 +2856,19 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
     zIndex: 1,
   },
+  quizSetBadge: {
+    position: "absolute",
+    zIndex: 5,
+    border: "3px solid #111",
+    borderRadius: 999,
+    background: "#fff3c4",
+    color: "#244988",
+    fontWeight: 900,
+    lineHeight: 1,
+    boxShadow: "0 3px 0 rgba(0,0,0,0.12)",
+    pointerEvents: "none",
+    whiteSpace: "nowrap",
+  },
   topTitleArea: {
     display: "flex",
     alignItems: "center",
@@ -2832,7 +2899,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   desktopLayout: {
     display: "grid",
-    gridTemplateColumns: "150px minmax(0, 1fr)",
+    gridTemplateColumns: "132px minmax(0, 1fr)",
     gap: 18,
     height: "100%",
     alignItems: "stretch",
@@ -2840,9 +2907,9 @@ const styles: Record<string, React.CSSProperties> = {
   desktopLeftButtons: {
     display: "flex",
     flexDirection: "column",
-    gap: 14,
-    justifyContent: "center",
-    paddingTop: 58,
+    gap: 8,
+    justifyContent: "flex-start",
+    paddingTop: 132,
   },
   desktopMain: {
     minWidth: 0,
@@ -2852,25 +2919,25 @@ const styles: Record<string, React.CSSProperties> = {
   },
   desktopTop: {
     display: "grid",
-    gridTemplateColumns: "84px minmax(0, 1fr) 138px",
-    gap: 12,
+    gridTemplateColumns: "84px minmax(0, 1fr) 118px",
+    gap: 10,
     alignItems: "start",
   },
   numberWrapDesktop: {
     display: "flex",
     justifyContent: "flex-start",
-    paddingTop: 18,
+    paddingTop: 8,
     transform: "translateX(-68px)",
   },
   promptWrapDesktop: {
     minWidth: 0,
   },
   translationRowDesktop: {
-    minHeight: 54,
+    minHeight: 38,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 10,
+    paddingTop: 6,
     width: "calc(100% + 56px)",
     transform: "translateX(-56px)",
     marginLeft: "auto",
@@ -2878,11 +2945,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   desktopBottom: {
     display: "grid",
-    gap: 10,
+    gap: 8,
     alignItems: "start",
     flex: 1,
     minHeight: 0,
-    marginTop: 0,
+    marginTop: -6,
   },
   inputBlockDesktop: {
     minWidth: 0,
@@ -2890,7 +2957,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     justifyContent: "flex-start",
     paddingTop: "0px",
-    transform: "translateY(-8px)",
+    transform: "translateY(-16px)",
   },
   hintBlockDesktop: {
     minWidth: 0,
@@ -2901,19 +2968,21 @@ const styles: Record<string, React.CSSProperties> = {
   mobileLayout: {
     display: "flex",
     flexDirection: "column",
-    gap: 10,
+    gap: 6,
   },
   mobileTopRow: {
     display: "flex",
     justifyContent: "space-between",
-    gap: 10,
+    gap: 8,
+    marginTop: -2,
+    marginBottom: -2,
   },
   mobileButtonsRow: {
     display: "grid",
-    gap: 10,
+    gap: 8,
   },
   translationRowMobile: {
-    minHeight: 26,
+    minHeight: 20,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -2923,37 +2992,37 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
   sideBlueButton: {
-    border: "4px solid #111",
+    border: "3px solid #111",
     borderRadius: 999,
     background: "#4d97d4",
     color: "#fff",
     fontWeight: 900,
     cursor: "pointer",
-    padding: "10px 10px",
-    boxShadow: "0 5px 0 rgba(0,0,0,0.15)",
+    padding: "7px 8px",
+    boxShadow: "0 4px 0 rgba(0,0,0,0.15)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    fontSize: 14,
+    fontSize: 12,
     lineHeight: 1.08,
-    minHeight: 76,
+    minHeight: 62,
     justifyContent: "center",
   },
   sidePinkButton: {
-    border: "4px solid #111",
+    border: "3px solid #111",
     borderRadius: 999,
     background: "#cf6da2",
     color: "#fff",
     fontWeight: 900,
     cursor: "pointer",
-    padding: "10px 10px",
-    boxShadow: "0 5px 0 rgba(0,0,0,0.15)",
+    padding: "7px 8px",
+    boxShadow: "0 4px 0 rgba(0,0,0,0.15)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    fontSize: 14,
+    fontSize: 12,
     lineHeight: 1.08,
-    minHeight: 76,
+    minHeight: 62,
     justifyContent: "center",
   },
   sideBlueButtonMobile: {
@@ -2991,8 +3060,8 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
   },
   sideButtonNote: {
-    marginTop: 3,
-    fontSize: 11,
+    marginTop: 1,
+    fontSize: 8,
     fontWeight: 800,
     lineHeight: 1.05,
     opacity: 0.95,
@@ -3103,8 +3172,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     textAlign: "center",
     lineHeight: 1.04,
-    fontSize: 21,
-    marginBottom: 8,
+    fontSize: 20,
+    marginBottom: 6,
     marginTop: 0,
   },
   inputTitleMobile: {
@@ -3135,7 +3204,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   answerInputDesktop: {
     width: "100%",
-    height: 72,
+    height: 64,
     border: "8px solid #111",
     borderRadius: 22,
     background: "#fff",
@@ -3158,7 +3227,7 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box",
   },
   resultAreaDesktop: {
-    minHeight: 54,
+    minHeight: 46,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -3195,7 +3264,7 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.05,
   },
   correctMobile: {
-    marginTop: 10,
+    marginTop: 4,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -3203,7 +3272,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
   },
   wrongMobile: {
-    marginTop: 10,
+    marginTop: 4,
     textAlign: "center",
   },
   wrongAnswerMobile: {
@@ -3227,8 +3296,8 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "stretch",
     justifyContent: "flex-start",
     width: "100%",
-    gap: 8,
-    transform: "translateY(-14px)",
+    gap: 6,
+    transform: "translateY(-22px)",
   },
   mobileHintBlock: {
     display: "flex",
@@ -3269,9 +3338,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   hintPanelWrap: {
     position: "relative",
-    paddingTop: 18,
+    paddingTop: 14,
     width: "100%",
-    transform: "translateY(-14px)",
+    transform: "translateY(-24px)",
   },
   bulbDesktop: {
     position: "absolute",
@@ -3284,8 +3353,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    marginBottom: 2,
+    gap: 6,
+    marginBottom: -2,
   },
   mobileBulb: {
     textAlign: "center",
@@ -3304,8 +3373,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   hintTopBox: {
     background: "#90f0c9",
-    padding: "8px 10px 6px",
-    marginTop: 10,
+    padding: "7px 9px 5px",
+    marginTop: 6,
   },
   hintTopLine: {
     display: "grid",
@@ -3345,7 +3414,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   readingHeaderOn: {
     background: "#f48e8e",
-    padding: "6px 5px",
+    padding: "5px 4px",
     fontSize: 11,
     fontWeight: 900,
     lineHeight: 1.15,
@@ -3353,13 +3422,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   readingHeaderKun: {
     background: "#90b7e9",
-    padding: "6px 5px",
+    padding: "5px 4px",
     fontSize: 11,
     fontWeight: 900,
     lineHeight: 1.15,
   },
   readingCellLeft: {
-    padding: "6px 5px",
+    padding: "5px 4px",
     fontSize: 13,
     fontWeight: 900,
     borderTop: "2px solid #111",
@@ -3368,7 +3437,7 @@ const styles: Record<string, React.CSSProperties> = {
     wordBreak: "keep-all",
   },
   readingCellRight: {
-    padding: "6px 5px",
+    padding: "5px 4px",
     fontSize: 13,
     fontWeight: 900,
     borderTop: "2px solid #111",
@@ -3380,8 +3449,8 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 2,
   },
   okuriganaNote: {
-    marginTop: 6,
-    fontSize: 10,
+    marginTop: 5,
+    fontSize: 9,
     lineHeight: 1.25,
     fontWeight: 700,
     color: "#333",

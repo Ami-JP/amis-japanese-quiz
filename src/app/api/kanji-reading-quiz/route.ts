@@ -392,7 +392,8 @@ async function fetchQuestionPool(
     .eq("quiz_mode", "ordered")
     .order("order_in_unit", { ascending: true })
     .order("kanji_order_in_unit", { ascending: true, nullsFirst: false })
-    .order("reading_variant_order", { ascending: true, nullsFirst: false });
+    .order("reading_variant_order", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true });
 
   if (error) {
     throw new Error(error.message);
@@ -676,20 +677,57 @@ async function buildHintMapForRows(db: any, rows: ReadingQuestionRow[]) {
   return fetchKanjiHintMap(db, allHintKeys);
 }
 
+function compareReadingRows(a: ReadingQuestionRow, b: ReadingQuestionRow) {
+  const aOrder = normalizeNumber(a.order_in_unit) ?? 999999;
+  const bOrder = normalizeNumber(b.order_in_unit) ?? 999999;
+  if (aOrder !== bOrder) return aOrder - bOrder;
+
+  const aKanjiOrder = normalizeNumber(a.kanji_order_in_unit) ?? 999999;
+  const bKanjiOrder = normalizeNumber(b.kanji_order_in_unit) ?? 999999;
+  if (aKanjiOrder !== bKanjiOrder) return aKanjiOrder - bKanjiOrder;
+
+  const aVariant = normalizeNumber(a.reading_variant_order) ?? 999999;
+  const bVariant = normalizeNumber(b.reading_variant_order) ?? 999999;
+  if (aVariant !== bVariant) return aVariant - bVariant;
+
+  const aId = normalizeNumber(a.id) ?? 999999;
+  const bId = normalizeNumber(b.id) ?? 999999;
+  return aId - bId;
+}
+
+function getOrderedRows(pool: ReadingQuestionRow[]) {
+  return pool
+    .filter((row) => {
+      const order = normalizeNumber(row.order_in_unit);
+      return order != null && order > 0;
+    })
+    .sort(compareReadingRows);
+}
+
 function filterPracticeSetPool(
   pool: ReadingQuestionRow[],
+  setNumber: number | null,
   startOrder: number | null,
   endOrder: number | null,
 ) {
+  const orderedRows = getOrderedRows(pool);
+
+  if (setNumber != null && setNumber >= 1) {
+    const startIndex = (setNumber - 1) * QUESTION_LIMIT;
+    return orderedRows.slice(startIndex, startIndex + QUESTION_LIMIT);
+  }
+
   if (startOrder == null || endOrder == null) {
     return [];
   }
 
-  return pool.filter((row) => {
-    const kanjiOrder = normalizeNumber(row.kanji_order_in_unit);
-    if (kanjiOrder == null) return false;
-    return kanjiOrder >= startOrder && kanjiOrder <= endOrder;
-  });
+  return orderedRows
+    .filter((row) => {
+      const order = normalizeNumber(row.order_in_unit);
+      if (order == null) return false;
+      return order >= startOrder && order <= endOrder;
+    })
+    .slice(0, QUESTION_LIMIT);
 }
 
 function buildSetOverview(params: {
@@ -702,16 +740,7 @@ function buildSetOverview(params: {
   const unitHasBeenCompleted =
     (progress?.completed_count ?? 0) >= 1 || progress?.is_completed === true;
 
-  const orderedRows = pool
-    .filter((row) => {
-      const order = normalizeNumber(row.order_in_unit);
-      return order != null && order > 0;
-    })
-    .sort(
-      (a, b) =>
-        (normalizeNumber(a.order_in_unit) ?? 0) -
-        (normalizeNumber(b.order_in_unit) ?? 0),
-    );
+  const orderedRows = getOrderedRows(pool);
 
   const totalQuestionCount = orderedRows.length;
   const totalSetCount = Math.ceil(totalQuestionCount / QUESTION_LIMIT);
@@ -888,6 +917,9 @@ export async function GET(request: NextRequest) {
     const endOrder = normalizeNumber(
       request.nextUrl.searchParams.get("endOrder"),
     );
+    const setNumber = normalizeNumber(
+      request.nextUrl.searchParams.get("setNumber"),
+    );
     const startFromBeginning =
       request.nextUrl.searchParams.get("startFromBeginning") === "1";
 
@@ -940,8 +972,8 @@ export async function GET(request: NextRequest) {
         mode: "review-wrong",
         startOrder: null,
         endOrder: null,
-        lastOrderCompleted: 0,
-        completedCount: 0,
+        lastOrderCompleted: overviewProgress?.last_order_completed ?? 0,
+        completedCount: overviewProgress?.completed_count ?? 0,
         finished: questions.length === 0,
         isUnitComplete: false,
         hasAdvancedAvailable: advancedAvailable,
@@ -957,20 +989,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (mode === "practice-set") {
-      const practiceSetPool = filterPracticeSetPool(pool, startOrder, endOrder);
-      const questionIds = practiceSetPool
-        .map((row) => questionIdKey(row.id))
-        .filter(Boolean);
-
-      const historyMap = await fetchReadingHistoryMap(
-        db,
-        account.id,
-        questionIds,
+      const practiceSetPool = filterPracticeSetPool(
+        pool,
+        setNumber,
+        startOrder,
+        endOrder,
       );
-      const selectedRows = chooseOneReadingPerKanji(
-        practiceSetPool,
-        historyMap,
-      );
+      const selectedRows = practiceSetPool.slice(0, QUESTION_LIMIT);
       const hintMap = await buildHintMapForRows(db, selectedRows);
       const questions = selectedRows.map((row) =>
         buildQuestionResponse(row, hintMap),
@@ -984,17 +1009,17 @@ export async function GET(request: NextRequest) {
         unit,
         difficulty_tier: difficultyTier,
         mode: "practice-set",
-        startOrder,
-        endOrder,
-        lastOrderCompleted: 0,
-        completedCount: 0,
+        setNumber: setNumber ?? null,
+        startOrder: normalizeNumber(selectedRows[0]?.order_in_unit) ?? startOrder,
+        endOrder:
+          normalizeNumber(selectedRows[selectedRows.length - 1]?.order_in_unit) ??
+          endOrder,
+        lastOrderCompleted: overviewProgress?.last_order_completed ?? 0,
+        completedCount: overviewProgress?.completed_count ?? 0,
         finished: questions.length === 0,
         isUnitComplete: false,
         hasAdvancedAvailable: advancedAvailable,
-        hasMoreReadingVariants: hasMoreReadingVariants(
-          practiceSetPool,
-          selectedRows,
-        ),
+        hasMoreReadingVariants: false,
         setOverview: await buildSetOverviewForUnit({
           db,
           studentAccountId: account.id,
@@ -1006,10 +1031,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (mode === "practice") {
-      const orderedRows = pool
-        .filter((row) => row.order_in_unit !== null && row.order_in_unit >= 1)
-        .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
-        .slice(0, QUESTION_LIMIT);
+      const orderedRows = getOrderedRows(pool).slice(0, QUESTION_LIMIT);
 
       const hintMap = await buildHintMapForRows(db, orderedRows);
       const questions = orderedRows.map((row) =>
@@ -1026,8 +1048,8 @@ export async function GET(request: NextRequest) {
         mode: "practice",
         startOrder: null,
         endOrder: null,
-        lastOrderCompleted: 0,
-        completedCount: 0,
+        lastOrderCompleted: overviewProgress?.last_order_completed ?? 0,
+        completedCount: overviewProgress?.completed_count ?? 0,
         finished: questions.length === 0,
         isUnitComplete: false,
         hasAdvancedAvailable: advancedAvailable,
@@ -1115,12 +1137,8 @@ export async function GET(request: NextRequest) {
 
     const lastOrderCompleted = progress?.last_order_completed ?? 0;
 
-    const orderedRows = pool
-      .filter(
-        (row) =>
-          row.order_in_unit !== null && row.order_in_unit > lastOrderCompleted,
-      )
-      .sort((a, b) => (a.order_in_unit ?? 0) - (b.order_in_unit ?? 0))
+    const orderedRows = getOrderedRows(pool)
+      .filter((row) => (normalizeNumber(row.order_in_unit) ?? 0) > lastOrderCompleted)
       .slice(0, QUESTION_LIMIT);
 
     const hintMap = await buildHintMapForRows(db, orderedRows);
@@ -1226,7 +1244,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (mode !== "normal" && mode !== "practice") {
+    if (mode !== "normal" && mode !== "practice" && mode !== "practice-set") {
       return NextResponse.json({
         ok: true,
         isUnitComplete: false,
@@ -1245,6 +1263,8 @@ export async function POST(request: NextRequest) {
     const currentLastOrderCompleted =
       mode === "practice"
         ? 0
+        : mode === "practice-set"
+        ? progress?.last_order_completed ?? 0
         : (baseLastOrderCompleted ?? progress?.last_order_completed ?? 0);
 
     const currentCompletedCount = progress?.completed_count ?? 0;

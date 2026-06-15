@@ -28,8 +28,13 @@ type AttemptRow = {
 type UnitProgressRow = {
   unit: string;
   last_order_completed: number | null;
+  completed_count: number | null;
   is_completed: boolean | null;
   last_studied_at: string | null;
+};
+
+type ReadingProgressRow = UnitProgressRow & {
+  difficulty_tier: string | null;
 };
 
 type KanjiHintRow = {
@@ -52,6 +57,7 @@ type QuestionMasterRow = {
   kanji_order_in_unit: number | null;
   reading_variant_order: number | null;
   hint_kanji_keys: string | null;
+  difficulty_tier: string | null;
 };
 
 type MistakeHistoryItem = {
@@ -72,6 +78,8 @@ type UnitCardData = {
   meaning_total_count: number;
   reading_answered_count: number;
   reading_total_count: number;
+  advanced_answered_count: number;
+  advanced_total_count: number;
   mistake_count: number;
   unresolved_count: number;
 };
@@ -182,13 +190,48 @@ function getUniqueQuestionCount(attempts: AttemptRow[]) {
   return new Set(attempts.map((attempt) => getAttemptQuestionKey(attempt))).size;
 }
 
-function getLatestStudiedAt(unitProgressList: UnitProgressRow[]) {
-  const dates = unitProgressList
-    .map((item) => item.last_studied_at)
+function normalizeDifficultyTier(value: string | null | undefined) {
+  return String(value ?? "normal") === "high_level" ? "high_level" : "normal";
+}
+
+function getLatestDate(values: Array<string | null | undefined>) {
+  const dates = values
     .filter((value): value is string => Boolean(value))
     .sort();
 
   return dates.length > 0 ? dates[dates.length - 1] : null;
+}
+
+function getLatestStudiedAt(
+  meaningProgressList: UnitProgressRow[],
+  readingProgressList: ReadingProgressRow[]
+) {
+  return getLatestDate([
+    ...meaningProgressList.map((item) => item.last_studied_at),
+    ...readingProgressList.map((item) => item.last_studied_at),
+  ]);
+}
+
+function countCompletedByProgress<T extends { order_in_unit: number | null }>(
+  rows: T[],
+  progress: UnitProgressRow | ReadingProgressRow | undefined
+) {
+  const total = rows.length;
+
+  if (total === 0) return 0;
+
+  if ((progress?.completed_count ?? 0) >= 1 || progress?.is_completed === true) {
+    return total;
+  }
+
+  const lastOrderCompleted = progress?.last_order_completed ?? 0;
+
+  if (lastOrderCompleted <= 0) return 0;
+
+  return rows.filter((row) => {
+    const order = row.order_in_unit ?? 0;
+    return order > 0 && order <= lastOrderCompleted;
+  }).length;
 }
 
 function getGradeFromUnit(unit: string) {
@@ -307,50 +350,83 @@ function buildMistakeHistory(attempts: AttemptRow[]) {
 
 function buildUnitCards(params: {
   attempts: AttemptRow[];
-  unitProgressList: UnitProgressRow[];
+  meaningProgressList: UnitProgressRow[];
+  readingProgressList: ReadingProgressRow[];
   kanjiHints: KanjiHintRow[];
-  readingQuestions: QuestionMasterRow[];
+  readingNormalQuestions: QuestionMasterRow[];
+  readingAdvancedQuestions: QuestionMasterRow[];
   mistakeHistory: MistakeHistoryItem[];
 }) {
   const {
     attempts,
-    unitProgressList,
+    meaningProgressList,
+    readingProgressList,
     kanjiHints,
-    readingQuestions,
+    readingNormalQuestions,
+    readingAdvancedQuestions,
     mistakeHistory,
   } = params;
 
-  const latestStudiedAt = getLatestStudiedAt(unitProgressList);
+  const latestStudiedAt = getLatestStudiedAt(
+    meaningProgressList,
+    readingProgressList
+  );
 
   const unitNames = Array.from(
     new Set([
       ...kanjiHints.map((row) => row.unit),
-      ...readingQuestions.map((row) => row.unit),
-      ...unitProgressList.map((row) => row.unit),
+      ...readingNormalQuestions.map((row) => row.unit),
+      ...readingAdvancedQuestions.map((row) => row.unit),
+      ...meaningProgressList.map((row) => row.unit),
+      ...readingProgressList.map((row) => row.unit),
       ...attempts.map((row) => row.unit),
     ])
   )
-    .filter(Boolean)
+    .filter((unit): unit is string => Boolean(unit) && getGradeFromUnit(unit) !== null)
     .sort(sortUnitNames);
 
   return unitNames.map((unit): UnitCardData => {
-    const progress = unitProgressList.find((item) => item.unit === unit);
+    const meaningProgress = meaningProgressList.find((item) => item.unit === unit);
+
+    const readingNormalProgress = readingProgressList.find(
+      (item) =>
+        item.unit === unit && normalizeDifficultyTier(item.difficulty_tier) === "normal"
+    );
+
+    const readingAdvancedProgress = readingProgressList.find(
+      (item) =>
+        item.unit === unit &&
+        normalizeDifficultyTier(item.difficulty_tier) === "high_level"
+    );
 
     const unitAttempts = attempts.filter((attempt) => attempt.unit === unit);
 
-    const meaningAttempts = unitAttempts.filter((attempt) =>
-      isMeaningQuiz(attempt.quiz_type)
+    const meaningRows = kanjiHints.filter((row) => row.unit === unit);
+    const normalReadingRows = readingNormalQuestions.filter(
+      (row) => row.unit === unit
+    );
+    const advancedReadingRows = readingAdvancedQuestions.filter(
+      (row) => row.unit === unit
     );
 
-    const readingAttempts = unitAttempts.filter((attempt) =>
-      isReadingQuiz(attempt.quiz_type)
+    const meaningTotal = meaningRows.length;
+    const readingTotal = normalReadingRows.length;
+    const advancedTotal = advancedReadingRows.length;
+
+    const meaningAnswered = countCompletedByProgress(
+      meaningRows,
+      meaningProgress
     );
 
-    const meaningTotal = kanjiHints.filter((row) => row.unit === unit).length;
-    const readingTotal = readingQuestions.filter((row) => row.unit === unit).length;
+    const readingAnswered = countCompletedByProgress(
+      normalReadingRows,
+      readingNormalProgress
+    );
 
-    const meaningAnswered = getUniqueQuestionCount(meaningAttempts);
-    const readingAnswered = getUniqueQuestionCount(readingAttempts);
+    const advancedAnswered = countCompletedByProgress(
+      advancedReadingRows,
+      readingAdvancedProgress
+    );
 
     const unitMistakes = mistakeHistory.filter((item) => item.unit === unit);
 
@@ -365,14 +441,12 @@ function buildUnitCards(params: {
       readingTotal,
     });
 
-    const lastStudiedAt =
-      progress?.last_studied_at ??
-      unitAttempts
-        .map((attempt) => attempt.answered_at)
-        .filter((value): value is string => Boolean(value))
-        .sort()
-        .at(-1) ??
-      null;
+    const lastStudiedAt = getLatestDate([
+      meaningProgress?.last_studied_at,
+      readingNormalProgress?.last_studied_at,
+      readingAdvancedProgress?.last_studied_at,
+      ...unitAttempts.map((attempt) => attempt.answered_at),
+    ]);
 
     return {
       unit,
@@ -384,6 +458,8 @@ function buildUnitCards(params: {
       meaning_total_count: meaningTotal,
       reading_answered_count: readingAnswered,
       reading_total_count: readingTotal,
+      advanced_answered_count: advancedAnswered,
+      advanced_total_count: advancedTotal,
       mistake_count: unitMistakes.length,
       unresolved_count: unresolved.length,
     };
@@ -476,9 +552,19 @@ export default async function TeacherStudentDetailPage({
 
   const { data: unitProgressRows, error: unitProgressError } = await db
     .from("student_kanji_progress")
-    .select("unit, last_order_completed, is_completed, last_studied_at")
+    .select("unit, last_order_completed, completed_count, is_completed, last_studied_at")
     .eq("student_account_id", id)
     .order("unit", { ascending: true });
+
+  const { data: readingProgressRows, error: readingProgressError } = await db
+    .from("student_reading_progress")
+    .select(
+      "unit, difficulty_tier, last_order_completed, completed_count, is_completed, last_studied_at"
+    )
+    .eq("student_account_id", id)
+    .in("difficulty_tier", ["normal", "high_level"])
+    .order("unit", { ascending: true })
+    .order("difficulty_tier", { ascending: true });
 
   const { data: kanjiHintsRaw, error: kanjiHintsError } = await db
     .from("kanji_hints")
@@ -502,10 +588,12 @@ export default async function TeacherStudentDetailPage({
       order_in_unit,
       kanji_order_in_unit,
       reading_variant_order,
-      hint_kanji_keys
+      hint_kanji_keys,
+      difficulty_tier
     `
     )
     .eq("is_published", true)
+    .eq("quiz_mode", "ordered")
     .eq("category", "kanji");
 
   if (attemptsError) {
@@ -519,7 +607,15 @@ export default async function TeacherStudentDetailPage({
   if (unitProgressError) {
     return (
       <ErrorView
-        message={`ユニット別進捗を読み込めませんでした：${unitProgressError.message}`}
+        message={`意味クイズ進捗を読み込めませんでした：${unitProgressError.message}`}
+      />
+    );
+  }
+
+  if (readingProgressError) {
+    return (
+      <ErrorView
+        message={`読みクイズ進捗を読み込めませんでした：${readingProgressError.message}`}
       />
     );
   }
@@ -542,19 +638,30 @@ export default async function TeacherStudentDetailPage({
 
   const studentData: StudentProgressRow = student;
   const attemptList: AttemptRow[] = attempts ?? [];
-  const unitProgressList: UnitProgressRow[] = unitProgressRows ?? [];
+  const meaningProgressList: UnitProgressRow[] = unitProgressRows ?? [];
+  const readingProgressList: ReadingProgressRow[] = readingProgressRows ?? [];
   const kanjiHints: KanjiHintRow[] = kanjiHintsRaw ?? [];
   const readingQuestions: QuestionMasterRow[] = (readingQuestionsRaw ?? []).filter(
     (question: QuestionMasterRow) => isReadingQuestionMaster(question)
+  );
+
+  const readingNormalQuestions = readingQuestions.filter(
+    (question) => normalizeDifficultyTier(question.difficulty_tier) === "normal"
+  );
+
+  const readingAdvancedQuestions = readingQuestions.filter(
+    (question) => normalizeDifficultyTier(question.difficulty_tier) === "high_level"
   );
 
   const mistakeHistory = buildMistakeHistory(attemptList);
 
   const unitCards = buildUnitCards({
     attempts: attemptList,
-    unitProgressList,
+    meaningProgressList,
+    readingProgressList,
     kanjiHints,
-    readingQuestions,
+    readingNormalQuestions,
+    readingAdvancedQuestions,
     mistakeHistory,
   });
 
@@ -628,7 +735,7 @@ export default async function TeacherStudentDetailPage({
             <div>
               <h2 style={styles.sectionTitle}>グレード別進捗</h2>
               <p style={styles.sectionSubText}>
-                グレードを開くと、ユニットごとの進捗が表示されます。
+                グレードを開くと、ユニットごとの進捗が表示されます。読みはnormal、高度はhigh_levelを別々に表示します。
               </p>
             </div>
           </div>
@@ -657,12 +764,11 @@ export default async function TeacherStudentDetailPage({
           ) : (
             <div style={styles.gradeList}>
               {gradeGroups.map((gradeGroup) => (
-                <details
+                <section
                   key={gradeGroup.grade}
-                  open={gradeGroup.has_latest}
                   style={styles.gradeDetails}
                 >
-                  <summary style={styles.gradeSummary}>
+                  <div style={styles.gradeSummary}>
                     <div style={styles.gradeSummaryMain}>
                       <strong style={styles.gradeTitle}>
                         Grade {gradeGroup.grade}
@@ -678,7 +784,7 @@ export default async function TeacherStudentDetailPage({
                       <span>間違い {gradeGroup.mistake_count}</span>
                       <span>要確認 {gradeGroup.unresolved_count}</span>
                     </div>
-                  </summary>
+                  </div>
 
                   <div style={styles.unitGrid}>
                     {gradeGroup.units.map((unit) => {
@@ -734,6 +840,14 @@ export default async function TeacherStudentDetailPage({
                               </strong>
                             </div>
 
+                            <div style={styles.unitMiniBox}>
+                              <span style={styles.miniLabel}>高度</span>
+                              <strong style={styles.miniValue}>
+                                {unit.advanced_answered_count}/
+                                {unit.advanced_total_count}
+                              </strong>
+                            </div>
+
                             <div
                               style={{
                                 ...styles.unitMiniBox,
@@ -775,7 +889,7 @@ export default async function TeacherStudentDetailPage({
                       );
                     })}
                   </div>
-                </details>
+                </section>
               ))}
             </div>
           )}
