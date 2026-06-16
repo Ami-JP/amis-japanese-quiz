@@ -64,6 +64,9 @@ function getParamValue(value: string | string[] | undefined) {
 }
 
 function getDayText(dayNumber: number) {
+  if (dayNumber === 29) return "まちがえ\nやすい\n漢字①";
+  if (dayNumber === 30) return "まちがえ\nやすい\n漢字②";
+
   return `${dayNumber}\n日目`;
 }
 
@@ -97,6 +100,8 @@ function getDayClass(day: CourseHomeDay) {
   }
   if (day.day_number === 28 || day.day_number === 30) classes.push("finalDay");
   if (day.day_number === 29) classes.push("reviewDay");
+  if (day.day_number === 29) classes.push("challengeDay");
+  if (day.day_number === 30) classes.push("finalCheckDay");
 
   return classes.join(" ");
 }
@@ -110,7 +115,7 @@ function getDayDecoration(dayNumber: number) {
   if (dayNumber === 21) return "🔥";
   if (dayNumber === 25) return "🎈";
   if (dayNumber === 28) return "🚩";
-  if (dayNumber === 29) return "📘";
+  if (dayNumber === 29) return "📝";
   if (dayNumber === 30) return "🏁";
   return "";
 }
@@ -120,9 +125,9 @@ function getMotivationLabel(dayNumber: number) {
   if (dayNumber === 7) return "1週間達成！";
   if (dayNumber === 14) return "半分まで来た！";
   if (dayNumber === 21) return "あと少し！";
-  if (dayNumber === 28) return "漢字パート完了！";
-  if (dayNumber === 29) return "総復習";
-  if (dayNumber === 30) return "Final Check";
+  if (dayNumber === 28) return "28日達成！";
+  if (dayNumber === 29) return "Mix-up Kanji 1";
+  if (dayNumber === 30) return "Mix-up Kanji 2";
   return "";
 }
 
@@ -247,7 +252,7 @@ export default function CourseHomePage() {
 
           <div className="courseName">
             <span>JLPT N4</span>
-            <strong>30日集中対策</strong>
+            <strong>28日集中対策 + まちがえやすい漢字</strong>
           </div>
 
           <button className="logoutButton" type="button" onClick={handleLogout}>
@@ -259,9 +264,9 @@ export default function CourseHomePage() {
           <div className="heroText">
             <p className="courseLabel">JLPT N4</p>
             <h1>
-              <span>N4</span> 30日集中対策
+              <span>N4</span> 28日集中対策
             </h1>
-            <p>毎日コツコツ、合格へまっしぐら！</p>
+            <p>28日で基礎を固めて、最後にまちがえやすい漢字を確認！</p>
           </div>
 
           <div className="ninjaBox">
@@ -283,10 +288,11 @@ export default function CourseHomePage() {
             </div>
 
             <div className="summaryItem">
-              <p>完了した日数</p>
+              <p>完了した項目</p>
               <strong>
-                {completedDays} / {totalDays}日
+                {completedDays} / {totalDays}
               </strong>
+              <span className="smallStat">28 days + 2 mix-up kanji reviews</span>
               {reviewNeededDays > 0 && (
                 <span className="smallStat">復習あり {reviewNeededDays}日 / Review needed</span>
               )}
@@ -1091,6 +1097,13 @@ const styles = `
     height: 124px;
   }
 
+  .dayNode.challengeDay span,
+  .dayNode.finalCheckDay span {
+    font-size: 18px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+  }
+
   .dayNode.reviewDay {
     outline: 3px solid rgba(221, 214, 254, 0.34);
     outline-offset: 5px;
@@ -1371,6 +1384,12 @@ const styles = `
       height: 78px;
     }
 
+    .dayNode.challengeDay span,
+    .dayNode.finalCheckDay span {
+      font-size: 12px;
+      line-height: 1.05;
+    }
+
     .dayNode span {
       font-size: 20px;
     }
@@ -1422,6 +1441,12 @@ const styles = `
     .dayNode.finalDay {
       width: 68px;
       height: 68px;
+    }
+
+    .dayNode.challengeDay span,
+    .dayNode.finalCheckDay span {
+      font-size: 11px;
+      line-height: 1.1;
     }
 
     .dayNode span {

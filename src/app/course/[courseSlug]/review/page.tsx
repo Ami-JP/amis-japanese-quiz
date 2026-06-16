@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -113,6 +113,14 @@ function getParamValue(value: string | string[] | undefined) {
   return value ?? "";
 }
 
+const choiceQuizTypes = new Set([
+  "kanji_meaning",
+  "reading_choice",
+  "kanji_choice",
+  "context_vocab_choice",
+  "same_meaning_choice",
+]);
+
 function isMeaningQuestion(question: ReviewQuestion) {
   return (
     question.section === "kanji_meaning" ||
@@ -120,8 +128,12 @@ function isMeaningQuestion(question: ReviewQuestion) {
   );
 }
 
-function isReadingQuestion(question: ReviewQuestion) {
-  if (isMeaningQuestion(question)) return false;
+function isChoiceQuestion(question: ReviewQuestion) {
+  return choiceQuizTypes.has(question.quiz_type);
+}
+
+function isReadingInputQuestion(question: ReviewQuestion) {
+  if (isChoiceQuestion(question)) return false;
 
   return (
     question.section === "kanji_reading" ||
@@ -132,6 +144,17 @@ function isReadingQuestion(question: ReviewQuestion) {
     question.section.includes("reading") ||
     question.quiz_type.includes("reading")
   );
+}
+
+function isReadingQuestion(question: ReviewQuestion) {
+  if (isMeaningQuestion(question)) return false;
+  if (question.quiz_type === "reading_choice") return true;
+
+  return isReadingInputQuestion(question);
+}
+
+function shouldShowSentenceAfterAnswer(question: ReviewQuestion) {
+  return !isMeaningQuestion(question) && (isReadingQuestion(question) || isChoiceQuestion(question));
 }
 
 function safeChoices(value: unknown[]) {
@@ -164,7 +187,11 @@ function splitExamplePairs(params: {
 
 function getQuestionTypeLabel(question: ReviewQuestion) {
   if (isMeaningQuestion(question)) return "Kanji meaning";
-  if (isReadingQuestion(question)) return "Reading";
+  if (question.quiz_type === "reading_choice") return "Reading choice";
+  if (question.quiz_type === "kanji_choice") return "Kanji choice";
+  if (question.quiz_type === "context_vocab_choice") return "Vocabulary choice";
+  if (question.quiz_type === "same_meaning_choice") return "Meaning choice";
+  if (isReadingInputQuestion(question)) return "Reading";
   return "Quiz";
 }
 
@@ -173,16 +200,31 @@ function getQuestionInstruction(question: ReviewQuestion) {
     return "Choose the correct meaning.";
   }
 
-  if (isReadingQuestion(question)) {
+  if (question.quiz_type === "reading_choice") {
+    return "Choose the correct reading.";
+  }
+
+  if (question.quiz_type === "kanji_choice") {
+    return "Choose the correct kanji.";
+  }
+
+  if (question.quiz_type === "context_vocab_choice") {
+    return "Choose the best word for the sentence.";
+  }
+
+  if (question.quiz_type === "same_meaning_choice") {
+    return "Choose the sentence with a similar meaning.";
+  }
+
+  if (isReadingInputQuestion(question)) {
     return "Type the reading in hiragana or romaji.";
   }
 
   return "Answer the question.";
 }
 
-function highlightTarget(question: ReviewQuestion) {
-  const sentence = question.completed_sentence ?? question.prompt;
-  const targetText = question.target_text;
+function highlightText(params: { sentence: string; targetText: string }) {
+  const { sentence, targetText } = params;
 
   if (!sentence || !targetText || !sentence.includes(targetText)) {
     return sentence;
@@ -198,6 +240,103 @@ function highlightTarget(question: ReviewQuestion) {
       )}
     </span>
   ));
+}
+
+function highlightTarget(question: ReviewQuestion) {
+  return highlightText({
+    sentence: question.completed_sentence ?? question.prompt,
+    targetText: question.target_text,
+  });
+}
+
+function isDay29Or30MixupKanjiChoice(params: {
+  question: ReviewQuestion;
+  courseSlug: string;
+}) {
+  const { question, courseSlug } = params;
+
+  return (
+    courseSlug === "n4-28days" &&
+    (question.day_number === 29 || question.day_number === 30) &&
+    question.section === "mini_test" &&
+    question.quiz_type === "kanji_choice"
+  );
+}
+
+function isKanjiOnlyRubyText(value: string) {
+  // Extra Practiceでも、Day29/30の漢字選択問題だけは、送り仮名にはrubyを出さない。
+  // 例：多い -> 多(おお)い、少し -> 少(すこ)し。
+  return /^[一-龯々〆ヶヵ]+$/.test(value);
+}
+
+function getSafeQuestionRubyItems(question: ReviewQuestion) {
+  const sentence = question.completed_sentence ?? question.prompt;
+  const choices = safeChoices(question.choices_json);
+  const blockedTexts = new Set([
+    question.target_text,
+    question.answer_text,
+    ...choices,
+  ]);
+
+  return parseRubyAnnotations(question.ruby_annotations).filter((item) => {
+    if (!item.text || !item.reading) return false;
+    if (!isKanjiOnlyRubyText(item.text)) return false;
+    if (!sentence.includes(item.text)) return false;
+    if (blockedTexts.has(item.text)) return false;
+    return true;
+  });
+}
+
+function buildQuestionSentenceHtmlWithRuby(question: ReviewQuestion) {
+  const sentence = question.completed_sentence ?? question.prompt;
+  const targetText = question.target_text;
+  const safeRubyItems = getSafeQuestionRubyItems(question);
+
+  if (!sentence) return "";
+
+  if (!targetText || !sentence.includes(targetText)) {
+    return buildRubySentenceHtml({
+      sentence,
+      rubyAnnotations: safeRubyItems,
+    });
+  }
+
+  const parts = sentence.split(targetText);
+  const escapedTarget = escapeHtml(targetText);
+
+  return parts
+    .map((part, index) => {
+      const partHtml = buildRubySentenceHtml({
+        sentence: part,
+        rubyAnnotations: safeRubyItems,
+      });
+
+      if (index >= parts.length - 1) return partHtml;
+      return `${partHtml}<mark class="targetMark">${escapedTarget}</mark>`;
+    })
+    .join("");
+}
+
+function renderChoiceQuestionSentence(params: {
+  question: ReviewQuestion;
+  courseSlug: string;
+}) {
+  const { question, courseSlug } = params;
+
+  // N4コースのDay29/30「まちがえやすい漢字」だけ、問題文の漢字に安全なふりがなを出す。
+  // それ以外の復習問題は従来どおりにして、Day1〜28の読み問題へ影響させない。
+  if (!isDay29Or30MixupKanjiChoice({ question, courseSlug })) {
+    return highlightTarget(question);
+  }
+
+  return (
+    <span
+      className="rubySentence questionRubySentence"
+      dangerouslySetInnerHTML={{
+        __html: buildQuestionSentenceHtmlWithRuby(question),
+      }}
+    />
+  );
 }
 
 function escapeHtml(value: string) {
@@ -417,7 +556,7 @@ export default function CourseReviewPage() {
 
   useEffect(() => {
     if (!currentQuestion) return;
-    if (!isReadingQuestion(currentQuestion)) return;
+    if (!isReadingInputQuestion(currentQuestion)) return;
     if (answerResult) return;
     if (finished || loading) return;
 
@@ -450,7 +589,7 @@ export default function CourseReviewPage() {
   async function handleSubmit() {
     if (!currentQuestion || submitting || answerResult) return;
 
-    const userAnswer = isMeaningQuestion(currentQuestion)
+    const userAnswer = isChoiceQuestion(currentQuestion)
       ? selectedChoice.trim()
       : typedAnswer.trim();
 
@@ -751,11 +890,21 @@ export default function CourseReviewPage() {
 
         <p className="instruction">{getQuestionInstruction(currentQuestion)}</p>
 
-        {isMeaningQuestion(currentQuestion) ? (
+        {isChoiceQuestion(currentQuestion) ? (
           <>
-            <div className="targetKanji">{currentQuestion.target_text}</div>
-
-            <p className="promptText">{currentQuestion.prompt}</p>
+            {isMeaningQuestion(currentQuestion) ? (
+              <>
+                <div className="targetKanji">{currentQuestion.target_text}</div>
+                <p className="promptText">{currentQuestion.prompt}</p>
+              </>
+            ) : (
+              <div className="sentenceBox">
+                {renderChoiceQuestionSentence({
+                  question: currentQuestion,
+                  courseSlug,
+                })}
+              </div>
+            )}
 
             <div className="choiceList">
               {safeChoices(currentQuestion.choices_json).map((choice) => {
@@ -841,7 +990,7 @@ export default function CourseReviewPage() {
               <p className="explanationText">{answerResult.explanation_ja}</p>
             )}
 
-            {isReadingQuestion(currentQuestion) && getMeaningText(currentQuestion) && (
+            {!isMeaningQuestion(currentQuestion) && getMeaningText(currentQuestion) && (
               <p className="meaningText">
                 Meaning: <strong>{getMeaningText(currentQuestion)}</strong>
               </p>
@@ -890,7 +1039,7 @@ export default function CourseReviewPage() {
               </div>
             )}
 
-            {isReadingQuestion(currentQuestion) && (
+            {shouldShowSentenceAfterAnswer(currentQuestion) && (
               <div className="readingAfterAnswer">
                 <p
                   className="rubySentence"
@@ -917,7 +1066,7 @@ export default function CourseReviewPage() {
               onClick={handleSubmit}
               disabled={
                 submitting ||
-                (isMeaningQuestion(currentQuestion)
+                (isChoiceQuestion(currentQuestion)
                   ? !selectedChoice
                   : !typedAnswer.trim())
               }
@@ -1362,6 +1511,16 @@ const styles = `
     color: #7c3aed;
     font-size: 11px;
     font-weight: 900;
+  }
+
+  .questionRubySentence {
+    display: block;
+    font-size: 24px;
+    line-height: 1.9;
+  }
+
+  .questionRubySentence rt {
+    font-size: 11px;
   }
 
   .translationAfterAnswer {

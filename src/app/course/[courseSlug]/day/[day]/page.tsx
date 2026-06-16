@@ -120,12 +120,34 @@ function getParamValue(value: string | string[] | undefined) {
   return value ?? "";
 }
 
+const choiceQuizTypes = new Set([
+  "kanji_meaning",
+  "reading_choice",
+  "kanji_choice",
+  "context_vocab_choice",
+  "same_meaning_choice",
+]);
+
 function isMeaningQuestion(question: CourseQuestion) {
   return question.section === "kanji_meaning" || question.quiz_type === "kanji_meaning";
 }
 
-function isReadingQuestion(question: CourseQuestion) {
+function isChoiceQuestion(question: CourseQuestion) {
+  return choiceQuizTypes.has(question.quiz_type);
+}
+
+function isReadingInputQuestion(question: CourseQuestion) {
+  if (isChoiceQuestion(question)) return false;
+
   return question.section === "vocab_reading" || question.quiz_type === "sentence_reading";
+}
+
+function isReadingQuestion(question: CourseQuestion) {
+  return isReadingInputQuestion(question);
+}
+
+function shouldShowSentenceAfterAnswer(question: CourseQuestion) {
+  return !isMeaningQuestion(question);
 }
 
 function safeChoices(value: unknown[]) {
@@ -158,13 +180,36 @@ function splitExamplePairs(params: {
 
 function getQuestionTypeLabel(question: CourseQuestion) {
   if (isMeaningQuestion(question)) return "Kanji meaning";
+
+  if (question.quiz_type === "reading_choice") return "Reading choice";
+  if (question.quiz_type === "kanji_choice") return "Kanji choice";
+  if (question.quiz_type === "context_vocab_choice") return "Vocabulary choice";
+  if (question.quiz_type === "same_meaning_choice") return "Same meaning";
+
   if (isReadingQuestion(question)) return "Reading";
+
   return "Quiz";
 }
 
 function getQuestionInstruction(question: CourseQuestion) {
   if (isMeaningQuestion(question)) {
     return "Choose the correct meaning.";
+  }
+
+  if (question.quiz_type === "reading_choice") {
+    return "Choose the correct reading.";
+  }
+
+  if (question.quiz_type === "kanji_choice") {
+    return "Choose the correct kanji.";
+  }
+
+  if (question.quiz_type === "context_vocab_choice") {
+    return "Choose the best word for the sentence.";
+  }
+
+  if (question.quiz_type === "same_meaning_choice") {
+    return "Choose the sentence with almost the same meaning.";
   }
 
   if (isReadingQuestion(question)) {
@@ -194,6 +239,92 @@ function highlightTarget(question: CourseQuestion) {
       )}
     </span>
   ));
+}
+
+function isDay29Or30MixupKanjiChoice(question: CourseQuestion, dayNumber: number) {
+  return (
+    Number.isInteger(dayNumber) &&
+    (dayNumber === 29 || dayNumber === 30) &&
+    question.section === "mini_test" &&
+    question.quiz_type === "kanji_choice"
+  );
+}
+
+function isKanjiOnlyRubyText(value: string) {
+  // Day29/30の「漢字選択」では、送り仮名やかな部分にふりがなが付くと不自然になるため、
+  // rubyを出す対象は漢字だけに限定する。
+  // 例：多い -> 多(おお)い、少し -> 少(すこ)し。
+  return /^[一-龯々〆ヶヵ]+$/.test(value);
+}
+
+function getSafeQuestionRubyItems(question: CourseQuestion) {
+  const sentence = question.completed_sentence ?? question.prompt;
+  const choices = new Set(safeChoices(question.choices_json));
+  const blockedTexts = new Set([
+    question.target_text,
+    question.answer_text,
+    ...safeChoices(question.choices_json),
+  ]);
+
+  return parseRubyAnnotations(question.ruby_annotations).filter((item) => {
+    if (!item.text || !item.reading) return false;
+    if (!isKanjiOnlyRubyText(item.text)) return false;
+    if (!sentence.includes(item.text)) return false;
+    if (blockedTexts.has(item.text)) return false;
+    if (choices.has(item.text)) return false;
+    return true;
+  });
+}
+
+function buildQuestionSentenceHtmlWithRuby(question: CourseQuestion) {
+  const sentence = question.completed_sentence ?? question.prompt;
+  const targetText = question.target_text;
+  const safeRubyItems = getSafeQuestionRubyItems(question);
+
+  if (!sentence) return "";
+
+  if (!targetText || !sentence.includes(targetText)) {
+    return buildRubySentenceHtml({
+      sentence,
+      rubyAnnotations: safeRubyItems,
+      fallbackRubyItems: [],
+      fallbackTargetText: "",
+      fallbackReading: "",
+    });
+  }
+
+  const parts = sentence.split(targetText);
+  const escapedTarget = escapeHtml(targetText);
+
+  return parts
+    .map((part, index) => {
+      const partHtml = buildRubySentenceHtml({
+        sentence: part,
+        rubyAnnotations: safeRubyItems,
+        fallbackRubyItems: [],
+        fallbackTargetText: "",
+        fallbackReading: "",
+      });
+
+      if (index >= parts.length - 1) return partHtml;
+      return `${partHtml}<mark class="targetMark">${escapedTarget}</mark>`;
+    })
+    .join("");
+}
+
+function renderQuestionSentence(question: CourseQuestion, dayNumber: number) {
+  if (!isDay29Or30MixupKanjiChoice(question, dayNumber)) {
+    return highlightTarget(question);
+  }
+
+  return (
+    <span
+      className="rubySentence questionRubySentence"
+      dangerouslySetInnerHTML={{
+        __html: buildQuestionSentenceHtmlWithRuby(question),
+      }}
+    />
+  );
 }
 
 function escapeHtml(value: string) {
@@ -574,7 +705,7 @@ export default function CourseDayQuizPage() {
 
   useEffect(() => {
     if (!currentQuestion) return;
-    if (!isReadingQuestion(currentQuestion)) return;
+    if (!isReadingInputQuestion(currentQuestion)) return;
     if (answerResult) return;
     if (finished || loading) return;
 
@@ -712,7 +843,7 @@ export default function CourseDayQuizPage() {
     const questionAtSubmit = currentQuestion;
     const questionIdAtSubmit = questionAtSubmit.id;
 
-    const userAnswer = isMeaningQuestion(questionAtSubmit)
+    const userAnswer = isChoiceQuestion(questionAtSubmit)
       ? selectedChoice.trim()
       : typedAnswer.trim();
 
@@ -923,6 +1054,85 @@ ${message}`);
     const incorrect = latestProgress?.incorrect_count ?? wrongQuestionIds.length;
     const accuracy = latestProgress?.accuracy ?? 0;
     const hasReview = wrongQuestionIds.length > 0;
+    const isFinalDayCompletion =
+      courseSlug === "n4-28days" && dayNumber === 30 && !reviewMode;
+
+    if (isFinalDayCompletion) {
+      return (
+        <main className="page finalCelebrationPage">
+          <section className="card finishCard finalCelebrationCard">
+            <div className="celebrationStamps" aria-hidden="true">
+              <span>🎉</span>
+              <span>🏆</span>
+              <span>✨</span>
+            </div>
+
+            <p className="courseLabelDark">{courseData.course.title}</p>
+            <h2 className="finishTitle finalCelebrationTitle">
+              おつかれさまでした！
+            </h2>
+
+            <div className="finalMessageBox">
+              <p>約1か月間、ここまで本当によくがんばりましたね。</p>
+              <p>
+                毎日少しずつ積み重ねてきたことは、
+                テスト本番できっと力になります。
+              </p>
+              <p>
+                自信を持って、落ち着いて挑んでください🔥
+              </p>
+              <p>
+                試験前にもう一度確認したいときは、
+                Extra Practiceでまちがえた問題を復習してね♪
+              </p>
+            </div>
+
+            <div className="resultGrid finalResultGrid">
+              <div className="resultBox">
+                <span className="resultNumber">{answered}</span>
+                <span className="resultLabel">Answered</span>
+              </div>
+              <div className="resultBox">
+                <span className="resultNumber">{correct}</span>
+                <span className="resultLabel">Correct</span>
+              </div>
+              <div className="resultBox">
+                <span className="resultNumber">{incorrect}</span>
+                <span className="resultLabel">Review</span>
+              </div>
+              <div className="resultBox">
+                <span className="resultNumber">{accuracy}%</span>
+                <span className="resultLabel">Accuracy</span>
+              </div>
+            </div>
+
+            {hasReview ? (
+              <button className="reviewNeededButton" type="button" onClick={handleStartReview}>
+                <span>間違えた問題だけもう一度</span>
+                <small>Review missed questions from Day 30</small>
+              </button>
+            ) : (
+              <div className="statusBadge good">All correct! Great work!</div>
+            )}
+
+            <div className="buttonRow">
+              <Link className="primaryButton" href={`/course/${courseSlug}/review`}>
+                Extra Practiceで復習する
+              </Link>
+              <Link className="secondaryButton" href={courseHomeHref}>
+                ホームに戻る
+              </Link>
+            </div>
+
+            <p className="finishNote">
+              Your progress has been saved. Great work!
+            </p>
+          </section>
+
+          <style jsx>{styles}</style>
+        </main>
+      );
+    }
 
     return (
       <main className="page">
@@ -1023,9 +1233,16 @@ ${message}`);
 
         <p className="instruction">{getQuestionInstruction(currentQuestion)}</p>
 
-        {isMeaningQuestion(currentQuestion) ? (
+        {isChoiceQuestion(currentQuestion) ? (
           <>
-            <div className="targetKanji">{currentQuestion.target_text}</div>
+            {isMeaningQuestion(currentQuestion) ? (
+              <div className="targetKanji">{currentQuestion.target_text}</div>
+            ) : (
+              <div className="sentenceBox">
+                {renderQuestionSentence(currentQuestion, dayNumber)}
+              </div>
+            )}
+
             <p className="promptText">{currentQuestion.prompt}</p>
 
             <div className="choiceList">
@@ -1062,7 +1279,7 @@ ${message}`);
         ) : (
           <>
             <div className="sentenceBox">
-              {highlightTarget(currentQuestion)}
+              {renderQuestionSentence(currentQuestion, dayNumber)}
             </div>
 
             <label className="inputLabel" htmlFor="answer-input">
@@ -1154,7 +1371,7 @@ ${message}`);
               </div>
             )}
 
-            {isReadingQuestion(currentQuestion) && (
+            {shouldShowSentenceAfterAnswer(currentQuestion) && (
               <div className="readingAfterAnswer">
                 <p
                   className="rubySentence"
@@ -1182,7 +1399,7 @@ ${message}`);
               onClick={handleSubmit}
               disabled={
                 submitting ||
-                (isMeaningQuestion(currentQuestion)
+                (isChoiceQuestion(currentQuestion)
                   ? !selectedChoice
                   : !typedAnswer.trim())
               }
@@ -1311,6 +1528,63 @@ const styles = `
   .finishCard {
     padding: 28px 22px;
     text-align: center;
+  }
+
+  .finalCelebrationPage {
+    background:
+      radial-gradient(circle at top left, rgba(250, 204, 21, 0.22), transparent 32%),
+      radial-gradient(circle at top right, rgba(251, 146, 60, 0.24), transparent 30%),
+      linear-gradient(180deg, #1e1b4b 0%, #0f172a 100%);
+  }
+
+  .finalCelebrationCard {
+    position: relative;
+    overflow: hidden;
+    border: 2px solid rgba(250, 204, 21, 0.55);
+  }
+
+  .celebrationStamps {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 8px;
+    font-size: 42px;
+    line-height: 1;
+  }
+
+  .celebrationStamps span:nth-child(2) {
+    transform: translateY(-4px);
+  }
+
+  .finalCelebrationTitle {
+    font-size: clamp(28px, 8vw, 44px);
+    color: #92400e;
+  }
+
+  .finalMessageBox {
+    margin: 18px auto 20px;
+    max-width: 560px;
+    padding: 18px;
+    border-radius: 24px;
+    background: #fff7ed;
+    color: #431407;
+    border: 1px solid #fed7aa;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+  }
+
+  .finalMessageBox p {
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 1.75;
+  }
+
+  .finalMessageBox p:last-child {
+    margin-bottom: 0;
+  }
+
+  .finalResultGrid {
+    margin-top: 18px;
   }
 
   .questionHeader {
@@ -1603,6 +1877,12 @@ const styles = `
     color: #475569;
     font-size: 10px;
     font-weight: 800;
+  }
+
+  .questionRubySentence {
+    display: block;
+    margin: 0;
+    line-height: 2.05;
   }
 
   .translationAfterAnswer {
