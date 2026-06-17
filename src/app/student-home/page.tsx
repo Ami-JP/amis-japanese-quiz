@@ -398,6 +398,7 @@ export default async function StudentHomePage() {
       .eq("difficulty_tier", "normal")
       .in("unit", ALL_KANJI_UNIT_IDS),
 
+
     fetchAllStudentReadingHistory(db, session.studentAccountId),
   ]);
 
@@ -682,6 +683,24 @@ export default async function StudentHomePage() {
             );
           })}
         </div>
+
+        <section style={styles.writingEntrySection}>
+          <div>
+            <p style={styles.writingEntryLabel}>Extra Practice</p>
+            <h2 style={styles.writingEntryTitle}>Writing Quizに挑戦</h2>
+            <p style={styles.writingEntryText}>
+              ひらがなを見て、文に合う漢字を入力する練習です。
+            </p>
+            <p style={styles.writingEntryTextEn}>
+              Practice typing the correct kanji from hiragana.
+            </p>
+          </div>
+
+          <a href="/student-home/writing" style={styles.writingEntryButton}>
+            <span style={styles.writingEntryButtonMain}>Writing Quiz</span>
+            <span style={styles.writingEntryButtonSub}>漢字入力クイズを始める</span>
+          </a>
+        </section>
       </section>
     </main>
   );
@@ -912,7 +931,7 @@ const styles: Record<string, React.CSSProperties> = {
 
   continueGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
     gap: 10,
   },
 
@@ -994,7 +1013,7 @@ const styles: Record<string, React.CSSProperties> = {
 
   buttonGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
     gap: 12,
   },
 
@@ -1020,6 +1039,10 @@ const styles: Record<string, React.CSSProperties> = {
 
   readingButton: {
     background: "#d9ecff",
+  },
+
+  writingButton: {
+    background: "#efe5ff",
   },
 
   buttonMain: {
@@ -1048,4 +1071,77 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     transform: "rotate(8deg)",
   },
+
+  writingEntrySection: {
+    marginTop: 22,
+    background: "#f7f2ff",
+    border: "3px solid #7c3aed",
+    borderRadius: 24,
+    padding: "18px 16px",
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 14,
+    alignItems: "center",
+  },
+
+  writingEntryLabel: {
+    margin: 0,
+    color: "#7c3aed",
+    fontSize: 13,
+    fontWeight: 900,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+
+  writingEntryTitle: {
+    margin: "4px 0 6px",
+    fontSize: "clamp(22px, 4vw, 30px)",
+    fontWeight: 900,
+    color: "#172033",
+  },
+
+  writingEntryText: {
+    margin: 0,
+    fontSize: 14,
+    fontWeight: 800,
+    color: "#374151",
+  },
+
+  writingEntryTextEn: {
+    margin: "4px 0 0",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#6b7280",
+  },
+
+  writingEntryButton: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    minHeight: 78,
+    borderRadius: 20,
+    border: "3px solid #1f2b3d",
+    background: "#efe5ff",
+    color: "#172033",
+    textDecoration: "none",
+    boxShadow: "0 7px 0 rgba(31,43,61,0.12)",
+    padding: "12px 14px",
+    textAlign: "center",
+  },
+
+  writingEntryButtonMain: {
+    fontSize: 19,
+    fontWeight: 900,
+    lineHeight: 1.1,
+  },
+
+  writingEntryButtonSub: {
+    marginTop: 5,
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#516071",
+  },
+
 };
