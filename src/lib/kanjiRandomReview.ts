@@ -1231,8 +1231,8 @@ export async function handleReadingRandomReviewAttempts(request: NextRequest) {
       );
     }
 
-    const questionIds = Array.from(
-      new Set(
+    const questionIds: number[] = Array.from(
+      new Set<number>(
         attempts
           .map((item: any) => normalizeQuestionId(item?.question_id ?? item?.id))
           .filter((id: number | null): id is number => id != null),
@@ -1336,8 +1336,8 @@ export async function handleWritingRandomReviewAttempts(request: NextRequest) {
       );
     }
 
-    const questionIds = Array.from(
-      new Set(
+    const questionIds: number[] = Array.from(
+      new Set<number>(
         attempts
           .map((item: any) => normalizeQuestionId(item?.question_id ?? item?.id))
           .filter((id: number | null): id is number => id != null),
