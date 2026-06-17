@@ -684,6 +684,47 @@ export default async function StudentHomePage() {
           })}
         </div>
 
+        <section style={styles.randomReviewSection}>
+          <div>
+            <p style={styles.randomReviewLabel}>Random Review</p>
+            <h2 style={styles.randomReviewTitle}>今までの問題をランダム復習</h2>
+            <p style={styles.randomReviewText}>
+              これまでにやった問題を、5問だけランダムに復習しよう♪
+            </p>
+            <p style={styles.randomReviewTextEn}>
+              Review 5 questions you’ve already tried.
+            </p>
+          </div>
+
+          <div style={styles.randomReviewButtonGrid}>
+            <a
+              href="/kanji-quiz-test/random-review"
+              style={{
+                ...styles.randomReviewButton,
+                ...styles.meaningRandomReviewButton,
+              }}
+            >
+              <span style={styles.randomReviewButtonMain}>Meaning Review</span>
+              <span style={styles.randomReviewButtonSub}>
+                今までの意味問題をランダム復習
+              </span>
+            </a>
+
+            <a
+              href="/kanji-reading-quiz/random-review"
+              style={{
+                ...styles.randomReviewButton,
+                ...styles.readingRandomReviewButton,
+              }}
+            >
+              <span style={styles.randomReviewButtonMain}>Reading Review</span>
+              <span style={styles.randomReviewButtonSub}>
+                今までの読み問題をランダム復習
+              </span>
+            </a>
+          </div>
+        </section>
+
         <section style={styles.writingEntrySection}>
           <div>
             <p style={styles.writingEntryLabel}>Extra Practice</p>
@@ -1070,6 +1111,90 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 900,
     transform: "rotate(8deg)",
+  },
+
+  randomReviewSection: {
+    marginTop: 22,
+    marginBottom: 18,
+    background: "#fff7ed",
+    border: "3px solid #fb923c",
+    borderRadius: 24,
+    padding: "18px 16px",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: 14,
+  },
+
+  randomReviewLabel: {
+    margin: 0,
+    color: "#ea580c",
+    fontSize: 13,
+    fontWeight: 900,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+
+  randomReviewTitle: {
+    margin: "4px 0 6px",
+    fontSize: "clamp(22px, 4vw, 30px)",
+    fontWeight: 900,
+    color: "#172033",
+  },
+
+  randomReviewText: {
+    margin: 0,
+    fontSize: 14,
+    fontWeight: 800,
+    color: "#374151",
+  },
+
+  randomReviewTextEn: {
+    margin: "4px 0 0",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#6b7280",
+  },
+
+  randomReviewButtonGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 12,
+  },
+
+  randomReviewButton: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 84,
+    borderRadius: 20,
+    border: "3px solid #1f2b3d",
+    color: "#172033",
+    textDecoration: "none",
+    boxShadow: "0 7px 0 rgba(31,43,61,0.12)",
+    padding: "12px 14px",
+    textAlign: "center",
+  },
+
+  meaningRandomReviewButton: {
+    background: "#fff3c4",
+  },
+
+  readingRandomReviewButton: {
+    background: "#d9ecff",
+  },
+
+  randomReviewButtonMain: {
+    fontSize: 18,
+    fontWeight: 900,
+    lineHeight: 1.1,
+  },
+
+  randomReviewButtonSub: {
+    marginTop: 5,
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#516071",
   },
 
   writingEntrySection: {

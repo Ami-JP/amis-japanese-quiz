@@ -50,6 +50,29 @@ export default async function KanjiWritingLevelSelectPage() {
             </a>
           ))}
         </div>
+
+        <section style={styles.randomReviewSection}>
+          <div>
+            <p style={styles.randomReviewLabel}>Random Review</p>
+            <h2 style={styles.randomReviewTitle}>今までの書き問題をランダム復習</h2>
+            <p style={styles.randomReviewText}>
+              これまでにやった書き問題を、5問だけランダムに復習しよう♪
+            </p>
+            <p style={styles.randomReviewTextEn}>
+              Review 5 writing questions you’ve already tried.
+            </p>
+          </div>
+
+          <a
+            href="/kanji-writing-quiz/random-review"
+            style={styles.randomReviewButton}
+          >
+            <span style={styles.randomReviewButtonMain}>Writing Review</span>
+            <span style={styles.randomReviewButtonSub}>
+              今までの書き問題をランダム復習
+            </span>
+          </a>
+        </section>
       </section>
     </main>
   );
@@ -145,6 +168,81 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     fontWeight: 800,
     color: "#4c1d95",
+  },
+
+  randomReviewSection: {
+    background: "#fff7ed",
+    border: "3px solid #fb923c",
+    borderRadius: 22,
+    padding: "16px 16px",
+    marginTop: 18,
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 14,
+    alignItems: "center",
+  },
+
+  randomReviewLabel: {
+    margin: 0,
+    color: "#ea580c",
+    fontSize: 13,
+    fontWeight: 900,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+
+  randomReviewTitle: {
+    margin: "4px 0 6px",
+    fontSize: "clamp(21px, 4vw, 30px)",
+    fontWeight: 900,
+    color: "#172033",
+    lineHeight: 1.25,
+  },
+
+  randomReviewText: {
+    margin: 0,
+    fontSize: 14,
+    fontWeight: 800,
+    color: "#374151",
+    lineHeight: 1.6,
+  },
+
+  randomReviewTextEn: {
+    margin: "4px 0 0",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#6b7280",
+    lineHeight: 1.5,
+  },
+
+  randomReviewButton: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 82,
+    borderRadius: 20,
+    border: "3px solid #1f2b3d",
+    background: "#fff3c4",
+    color: "#172033",
+    textDecoration: "none",
+    boxShadow: "0 7px 0 rgba(31,43,61,0.12)",
+    padding: "12px 14px",
+    textAlign: "center",
+  },
+
+  randomReviewButtonMain: {
+    fontSize: 18,
+    fontWeight: 900,
+    lineHeight: 1.1,
+  },
+
+  randomReviewButtonSub: {
+    marginTop: 5,
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#516071",
+    lineHeight: 1.4,
   },
 
   levelGrid: {
